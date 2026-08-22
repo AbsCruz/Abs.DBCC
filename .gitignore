@@ -1,0 +1,25 @@
+# Build-Ergebnisse
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# .NET Core / .NET
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# User Secrets / lokale Overrides
+appsettings.*.local.json
+appsettings.Development.json
+secrets.json
+
+# Betriebssystem
+.DS_Store
+Thumbs.db

@@ -1,0 +1,14 @@
+<Solution>
+  <Project Path="Abs.DBCC.Application.Test/Abs.DBCC.Application.Test.csproj" />
+  <Project Path="Abs.DBCC.Application/Abs.DBCC.Application.csproj" />
+  <Project Path="Abs.DBCC.Desktop.Test/Abs.DBCC.Desktop.Test.csproj" />
+  <Project Path="Abs.DBCC.Desktop/Abs.DBCC.Desktop.csproj" />
+  <Project Path="Abs.DBCC.Domain.Test/Abs.DBCC.Domain.Test.csproj" />
+  <Project Path="Abs.DBCC.Domain/Abs.DBCC.Domain.csproj" />
+  <Project Path="Abs.DBCC.Infrastructure.Test/Abs.DBCC.Infrastructure.Test.csproj" />
+  <Project Path="Abs.DBCC.Infrastructure/Abs.DBCC.Infrastructure.csproj" />
+  <Project Path="Abs.DBCC.IntegrationTest/Abs.DBCC.IntegrationTest.csproj" />
+  <Project Path="Abs.DBCC.SharedKernel.Test/Abs.DBCC.SharedKernel.Test.csproj" />
+  <Project Path="Abs.DBCC.SharedKernel/Abs.DBCC.SharedKernel.csproj" />
+  <Project Path="Abs.DBCC.TestCommon/Abs.DBCC.TestCommon.csproj" />
+</Solution>

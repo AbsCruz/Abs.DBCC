@@ -1,0 +1,42 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Abs.DBCC.Desktop.ViewModels"
+             xmlns:collation="using:Abs.DBCC.Domain.Collation"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="700" d:DesignHeight="550"
+             x:Class="Abs.DBCC.Desktop.Views.TargetCollationPickerView"
+             x:DataType="vm:TargetCollationPickerViewModel">
+
+    <DockPanel Margin="24">
+
+        <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,12">
+            <TextBlock Text="Ziel-Collation wählen" FontSize="20" FontWeight="Bold" />
+            <TextBox Text="{Binding SearchText}" PlaceholderText="Suchen..." />
+            <TextBlock Text="Lädt..." IsVisible="{Binding IsLoading}" />
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="Red" />
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
+            <Button Content="Zurück" Command="{Binding BackCommand}" />
+            <CheckBox Content="Datenbank-Default-Collation ebenfalls ändern" IsChecked="{Binding UpdateDatabaseDefaultCollation}" VerticalAlignment="Center" />
+            <Button Content="Migrationsplan erstellen" Command="{Binding BuildPlanCommand}" IsEnabled="{Binding !IsBuildingPlan}" />
+            <TextBlock Text="Plan wird erstellt..." IsVisible="{Binding IsBuildingPlan}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <ScrollViewer>
+            <ListBox ItemsSource="{Binding FilteredCollations}" SelectedItem="{Binding SelectedCollation}">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="collation:CollationInfo">
+                        <StackPanel>
+                            <TextBlock Text="{Binding Name}" FontWeight="Bold" />
+                            <TextBlock Text="{Binding Description}" FontSize="11" Opacity="0.7" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </ScrollViewer>
+
+    </DockPanel>
+
+</UserControl>

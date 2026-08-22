@@ -1,0 +1,6 @@
+<Project>
+  <!-- Gilt für alle Projekte der Solution: Release-Publish soll keine .pdb-Dateien ausliefern -->
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+</Project>
