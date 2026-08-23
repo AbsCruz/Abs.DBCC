@@ -4,6 +4,7 @@ using Abs.DBCC.Application.Migration;
 using Abs.DBCC.Desktop.ViewModels;
 using Abs.DBCC.Domain.Collation;
 using Abs.DBCC.Domain.Migration;
+using Abs.DBCC.Domain.Snapshot;
 using Abs.DBCC.TestCommon.Builders;
 using MediatR;
 using Moq;
@@ -77,8 +78,10 @@ public class TargetCollationPickerViewModelTests
     [Fact]
     public async Task BuildPlanCommand_SelectedCollation_RaisesPlanBuilt()
     {
+        var source = new SqlCollationName("SQL_Latin1_General_CP1_CI_AS");
         var target = new SqlCollationName("Latin1_General_CS_AS");
-        var plan = new MigrationPlan(target, target, true, new DatabaseSnapshotBuilder().Build(), [], []);
+        var affectedTable = new ObjectRef("dbo", "Orders", DatabaseObjectKind.Table);
+        var plan = new MigrationPlan(source, target, true, new DatabaseSnapshotBuilder().Build(), [], [affectedTable]);
 
         var sender = CreateSenderReturningCollations();
         sender.Setup(s => s.Send(It.IsAny<BuildMigrationPlanCommand>(), It.IsAny<CancellationToken>()))
@@ -97,5 +100,31 @@ public class TargetCollationPickerViewModelTests
 
         Assert.NotNull(raised);
         Assert.Same(plan, raised.Value.Plan);
+        Assert.Null(vm.NoticeMessage);
+    }
+
+    [Fact]
+    public async Task BuildPlanCommand_NoOpPlan_SetsNoticeMessageInsteadOfRaisingPlanBuilt()
+    {
+        var target = new SqlCollationName("Latin1_General_CS_AS");
+        var plan = new MigrationPlan(target, target, true, new DatabaseSnapshotBuilder().Build(), [], []);
+
+        var sender = CreateSenderReturningCollations();
+        sender.Setup(s => s.Send(It.IsAny<BuildMigrationPlanCommand>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(plan);
+
+        var vm = new TargetCollationPickerViewModel(sender.Object, Profile)
+        {
+            SelectedCollation = new CollationInfo("Latin1_General_CS_AS", "Case-sensitive, accent-sensitive")
+        };
+
+        var raised = false;
+        vm.PlanBuilt += (_, _) => raised = true;
+
+        await vm.BuildPlanCommand.ExecuteAsync(null);
+
+        Assert.False(raised);
+        Assert.NotNull(vm.NoticeMessage);
+        Assert.Contains("Latin1_General_CS_AS", vm.NoticeMessage);
     }
 }

@@ -20,7 +20,7 @@
 
             <TextBlock Text="{x:Static res:Strings.CheckingActiveSessions}" IsVisible="{Binding IsLoadingPreflight}" />
             <StackPanel Spacing="4" IsVisible="{Binding Preflight, Converter={x:Static ObjectConverters.IsNotNull}}">
-                <TextBlock Text="{Binding OtherActiveConnectionsDisplay}" Foreground="OrangeRed" />
+                <TextBlock Text="{Binding OtherActiveConnectionsDisplay}" Foreground="OrangeRed" IsVisible="{Binding HasOtherActiveConnections}" />
                 <TextBlock Text="{Binding EstimatedAffectedRowsDisplay}" />
                 <TextBlock Text="{Binding TransactionLogDisplay}" />
             </StackPanel>

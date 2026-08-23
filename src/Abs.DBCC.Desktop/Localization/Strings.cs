@@ -91,4 +91,7 @@ public static class Strings
     public static string UpdateDatabaseDefaultCollationLabel => L("Datenbank-Default-Collation ebenfalls ändern", "Also change database default collation");
     public static string BuildPlanButton => L("Migrationsplan erstellen", "Build Migration Plan");
     public static string BuildingPlan => L("Plan wird erstellt...", "Building plan...");
+    public static string NoChangesNeededFormat => L(
+        "Datenbank und alle Tabellen haben bereits die Collation \"{0}\" – es sind keine Änderungen nötig.",
+        "The database and every table already have the \"{0}\" collation - no changes are needed.");
 }

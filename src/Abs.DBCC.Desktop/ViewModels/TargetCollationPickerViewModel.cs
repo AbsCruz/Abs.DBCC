@@ -1,6 +1,7 @@
 using Abs.DBCC.Application.Collations;
 using Abs.DBCC.Application.Connections;
 using Abs.DBCC.Application.Migration;
+using Abs.DBCC.Desktop.Localization;
 using Abs.DBCC.Domain.Collation;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -22,6 +23,9 @@ public partial class TargetCollationPickerViewModel : ViewModelBase
 
     [ObservableProperty]
     public partial string? ErrorMessage { get; set; }
+
+    [ObservableProperty]
+    public partial string? NoticeMessage { get; set; }
 
     [ObservableProperty]
     public partial IReadOnlyList<CollationInfo> Collations { get; set; } = [];
@@ -85,11 +89,19 @@ public partial class TargetCollationPickerViewModel : ViewModelBase
 
         IsBuildingPlan = true;
         ErrorMessage = null;
+        NoticeMessage = null;
 
         try
         {
             var plan = await _sender.Send(new BuildMigrationPlanCommand(
                 _profile, new SqlCollationName(SelectedCollation.Name), UpdateDatabaseDefaultCollation));
+
+            if (plan.IsNoOp)
+            {
+                NoticeMessage = string.Format(Strings.NoChangesNeededFormat, SelectedCollation.Name);
+                return;
+            }
+
             PlanBuilt?.Invoke(this, (_profile, plan));
         }
         catch (Exception ex)

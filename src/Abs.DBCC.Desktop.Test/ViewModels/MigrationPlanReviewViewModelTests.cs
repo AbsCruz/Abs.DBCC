@@ -53,6 +53,44 @@ public class MigrationPlanReviewViewModelTests
     }
 
     [Fact]
+    public async Task HasOtherActiveConnections_True_WhenPreflightReportsOtherSessions()
+    {
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PreflightCheckResult(2, 0, 0, 0));
+
+        var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
+        await vm.LoadPreflightCommand.ExecuteAsync(null);
+
+        Assert.True(vm.HasOtherActiveConnections);
+    }
+
+    [Fact]
+    public async Task HasOtherActiveConnections_False_WhenPreflightReportsNoOtherSessions()
+    {
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0));
+
+        var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
+        await vm.LoadPreflightCommand.ExecuteAsync(null);
+
+        Assert.False(vm.HasOtherActiveConnections);
+    }
+
+    [Fact]
+    public void HasOtherActiveConnections_False_WithoutPreflightLoaded()
+    {
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
+            .Returns(new TaskCompletionSource<PreflightCheckResult>().Task); // never completes
+
+        var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
+
+        Assert.False(vm.HasOtherActiveConnections);
+    }
+
+    [Fact]
     public void TransactionLogDisplay_WithoutPreflightLoaded_IsNull()
     {
         var sender = new Mock<ISender>();

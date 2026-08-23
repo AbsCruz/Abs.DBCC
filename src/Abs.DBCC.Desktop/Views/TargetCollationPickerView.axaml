@@ -16,6 +16,8 @@
             <TextBox Text="{Binding SearchText}" PlaceholderText="{x:Static res:Strings.SearchPlaceholder}" />
             <TextBlock Text="{x:Static res:Strings.Loading}" IsVisible="{Binding IsLoading}" />
             <TextBlock Text="{Binding ErrorMessage}" Foreground="Red" />
+            <TextBlock Text="{Binding NoticeMessage}" TextWrapping="Wrap"
+                       IsVisible="{Binding NoticeMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">

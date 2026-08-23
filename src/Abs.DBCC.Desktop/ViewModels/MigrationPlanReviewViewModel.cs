@@ -30,6 +30,8 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
 
     public string AffectedTablesDisplay { get; }
 
+    public bool HasOtherActiveConnections => Preflight is { OtherActiveSessionCount: > 0 };
+
     public string? OtherActiveConnectionsDisplay =>
         Preflight is null ? null : string.Format(Strings.OtherActiveConnectionsFormat, Preflight.OtherActiveSessionCount);
 
@@ -63,6 +65,7 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
 
     partial void OnPreflightChanged(PreflightCheckResult? value)
     {
+        OnPropertyChanged(nameof(HasOtherActiveConnections));
         OnPropertyChanged(nameof(OtherActiveConnectionsDisplay));
         OnPropertyChanged(nameof(EstimatedAffectedRowsDisplay));
         OnPropertyChanged(nameof(TransactionLogDisplay));
