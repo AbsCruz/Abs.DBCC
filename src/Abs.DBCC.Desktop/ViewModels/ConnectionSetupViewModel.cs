@@ -1,4 +1,5 @@
 using Abs.DBCC.Application.Connections;
+using Abs.DBCC.Desktop.Localization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
@@ -48,8 +49,8 @@ public partial class ConnectionSetupViewModel(ISender sender) : ViewModelBase
             var result = await sender.Send(new TestConnectionQuery(BuildProfile()));
             IsConnectionVerified = result.IsSuccess;
             StatusMessage = result.IsSuccess
-                ? "Verbindung erfolgreich."
-                : $"Verbindung fehlgeschlagen: {result.Error}";
+                ? Strings.ConnectionSucceeded
+                : string.Format(Strings.ConnectionFailedFormat, result.Error);
         }
         finally
         {

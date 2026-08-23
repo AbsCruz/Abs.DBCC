@@ -1,3 +1,4 @@
+using Abs.DBCC.Desktop.Localization;
 using Abs.DBCC.Desktop.ViewModels;
 using Abs.DBCC.Domain.Migration;
 
@@ -19,10 +20,10 @@ public class MigrationResultViewModelTests
 
         var text = vm.BuildReportText();
 
-        Assert.Contains("erfolgreich", text);
-        Assert.Contains("[OK]", text);
+        Assert.Contains(Strings.ReportSucceededWord, text);
+        Assert.Contains($"[{Strings.ReportStepOk}]", text);
         Assert.Contains("Collation von [dbo].[Orders].[Name] ändern", text);
-        Assert.Contains("keine Abweichungen", text);
+        Assert.Contains(Strings.ReportNoDiscrepancies, text);
     }
 
     [Fact]
@@ -37,9 +38,9 @@ public class MigrationResultViewModelTests
 
         var text = vm.BuildReportText();
 
-        Assert.Contains("fehlgeschlagen", text);
+        Assert.Contains(Strings.ReportFailedWord, text);
         Assert.Contains("Schritt 'Index entfernen' fehlgeschlagen: boom", text);
-        Assert.Contains("[FEHLER]", text);
+        Assert.Contains($"[{Strings.ReportStepError}]", text);
         Assert.Contains("boom", text);
     }
 
@@ -57,10 +58,10 @@ public class MigrationResultViewModelTests
 
         var text = vm.BuildReportText();
 
-        Assert.Contains("Abweichungen gefunden", text);
-        Assert.Contains("[Struktur]", text);
+        Assert.Contains(Strings.ReportDiscrepanciesFound, text);
+        Assert.Contains($"[{Strings.ReportStructuralLabel}]", text);
         Assert.Contains("Index [IX_1] fehlt.", text);
-        Assert.Contains("[Daten]", text);
+        Assert.Contains($"[{Strings.ReportDataLabel}]", text);
         Assert.Contains("Zeile 3 weicht ab.", text);
     }
 
@@ -86,6 +87,6 @@ public class MigrationResultViewModelTests
         vm.ExportReportCommand.Execute(null);
 
         Assert.NotNull(exportedText);
-        Assert.Contains("erfolgreich", exportedText);
+        Assert.Contains(Strings.ReportSucceededWord, exportedText);
     }
 }

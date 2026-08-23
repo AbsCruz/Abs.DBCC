@@ -1,5 +1,6 @@
 using Abs.DBCC.Application.Collations;
 using Abs.DBCC.Application.Connections;
+using Abs.DBCC.Desktop.Localization;
 using Abs.DBCC.Domain.Inspection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -23,6 +24,11 @@ public partial class CollationOverviewViewModel : ViewModelBase
 
     [ObservableProperty]
     public partial IReadOnlyList<TableCollationReport> Tables { get; set; } = [];
+
+    public string? DatabaseDefaultCollationDisplay =>
+        DatabaseDefaultCollation is null ? null : string.Format(Strings.DatabaseDefaultCollationFormat, DatabaseDefaultCollation);
+
+    partial void OnDatabaseDefaultCollationChanged(string? value) => OnPropertyChanged(nameof(DatabaseDefaultCollationDisplay));
 
     public event EventHandler? BackRequested;
     public event EventHandler? ContinueRequested;

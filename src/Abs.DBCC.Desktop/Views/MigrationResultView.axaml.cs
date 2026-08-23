@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Abs.DBCC.Desktop.Localization;
 using Abs.DBCC.Desktop.ViewModels;
 using Avalonia.Controls;
 using Avalonia.Platform.Storage;
@@ -28,10 +29,10 @@ public partial class MigrationResultView : UserControl
 
         var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = "Migrationsbericht speichern",
+            Title = Strings.SaveReportDialogTitle,
             SuggestedFileName = $"migration-report-{DateTime.Now:yyyyMMdd-HHmmss}.txt",
             DefaultExtension = "txt",
-            FileTypeChoices = [new FilePickerFileType("Textdatei") { Patterns = ["*.txt"] }]
+            FileTypeChoices = [new FilePickerFileType(Strings.TextFileLabel) { Patterns = ["*.txt"] }]
         });
 
         if (file is null)

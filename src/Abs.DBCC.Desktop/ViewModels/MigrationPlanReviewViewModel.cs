@@ -1,5 +1,6 @@
 using Abs.DBCC.Application.Connections;
 using Abs.DBCC.Application.Migration;
+using Abs.DBCC.Desktop.Localization;
 using Abs.DBCC.Domain.Migration;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -27,8 +28,17 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
     [ObservableProperty]
     public partial string? ErrorMessage { get; set; }
 
-    public string? LogFileSizeDisplay =>
-        Preflight is null ? null : $"{Preflight.LogFileSizeBytes / 1024.0 / 1024.0:F1} MB ({Preflight.LogUsedPercent:F1}% belegt)";
+    public string AffectedTablesDisplay { get; }
+
+    public string? OtherActiveConnectionsDisplay =>
+        Preflight is null ? null : string.Format(Strings.OtherActiveConnectionsFormat, Preflight.OtherActiveSessionCount);
+
+    public string? EstimatedAffectedRowsDisplay =>
+        Preflight is null ? null : string.Format(Strings.EstimatedAffectedRowsFormat, Preflight.EstimatedAffectedRowCount);
+
+    public string? TransactionLogDisplay =>
+        Preflight is null ? null : string.Format(Strings.TransactionLogFormat,
+            string.Format(Strings.LogFileSizeFormat, Preflight.LogFileSizeBytes / 1024.0 / 1024.0, Preflight.LogUsedPercent));
 
     public event EventHandler<(ConnectionProfile Profile, MigrationPlan Plan)>? StartRequested;
     public event EventHandler? BackRequested;
@@ -38,6 +48,7 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
         _sender = sender;
         _profile = profile;
         Plan = plan;
+        AffectedTablesDisplay = string.Format(Strings.AffectedTablesFormat, plan.AffectedTables.Count);
         StepCounts = plan.Steps
             .GroupBy(s => s.Kind)
             .Select(g => new StepKindCount(g.Key, g.Count()))
@@ -47,7 +58,12 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
         _ = LoadPreflightAsync();
     }
 
-    partial void OnPreflightChanged(PreflightCheckResult? value) => OnPropertyChanged(nameof(LogFileSizeDisplay));
+    partial void OnPreflightChanged(PreflightCheckResult? value)
+    {
+        OnPropertyChanged(nameof(OtherActiveConnectionsDisplay));
+        OnPropertyChanged(nameof(EstimatedAffectedRowsDisplay));
+        OnPropertyChanged(nameof(TransactionLogDisplay));
+    }
 
     [RelayCommand]
     private async Task LoadPreflightAsync()

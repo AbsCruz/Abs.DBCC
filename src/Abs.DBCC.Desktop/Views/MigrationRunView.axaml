@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Abs.DBCC.Desktop.ViewModels"
              xmlns:migration="using:Abs.DBCC.Domain.Migration"
+             xmlns:res="using:Abs.DBCC.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="700" d:DesignHeight="550"
@@ -11,19 +12,19 @@
     <DockPanel Margin="24">
 
         <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,12">
-            <TextBlock Text="Migration läuft..." FontSize="20" FontWeight="Bold" IsVisible="{Binding IsRunning}" />
-            <TextBlock Text="Migration wird abgebrochen..." FontSize="20" FontWeight="Bold" Foreground="OrangeRed" IsVisible="{Binding IsCancelling}" />
-            <TextBlock Text="Migration abgebrochen." FontSize="20" FontWeight="Bold" Foreground="OrangeRed" IsVisible="{Binding WasCancelled}" />
-            <TextBlock Text="Datenbankverbindung verloren." FontSize="20" FontWeight="Bold" Foreground="Red" IsVisible="{Binding HasUnexpectedError}" />
+            <TextBlock Text="{x:Static res:Strings.MigrationRunningTitle}" FontSize="20" FontWeight="Bold" IsVisible="{Binding IsRunning}" />
+            <TextBlock Text="{x:Static res:Strings.MigrationCancellingTitle}" FontSize="20" FontWeight="Bold" Foreground="OrangeRed" IsVisible="{Binding IsCancelling}" />
+            <TextBlock Text="{x:Static res:Strings.MigrationCancelledTitle}" FontSize="20" FontWeight="Bold" Foreground="OrangeRed" IsVisible="{Binding WasCancelled}" />
+            <TextBlock Text="{x:Static res:Strings.ConnectionLostTitle}" FontSize="20" FontWeight="Bold" Foreground="Red" IsVisible="{Binding HasUnexpectedError}" />
             <TextBlock Text="{Binding UnexpectedErrorMessage}" Foreground="Red" TextWrapping="Wrap" IsVisible="{Binding HasUnexpectedError}" />
-            <TextBlock Text="Migration abgeschlossen." FontSize="20" FontWeight="Bold" IsVisible="{Binding !IsRunning}" />
+            <TextBlock Text="{x:Static res:Strings.MigrationCompletedTitle}" FontSize="20" FontWeight="Bold" IsVisible="{Binding !IsRunning}" />
             <ProgressBar Minimum="0" Maximum="{Binding TotalStepCount}" Value="{Binding CompletedStepCount}" />
             <TextBlock>
-                <Run Text="{Binding CompletedStepCount}" /><Run Text=" / " /><Run Text="{Binding TotalStepCount}" /><Run Text=" Schritte" />
+                <Run Text="{Binding CompletedStepCount}" /><Run Text=" / " /><Run Text="{Binding TotalStepCount}" /><Run Text="{x:Static res:Strings.StepsSuffix}" />
             </TextBlock>
-            <Button Content="Abbrechen" Command="{Binding CancelCommand}" IsVisible="{Binding IsRunning}" />
-            <Button Content="Zurück zum Start" Command="{Binding AcknowledgeCancelledCommand}" IsVisible="{Binding WasCancelled}" />
-            <Button Content="Zurück zum Start" Command="{Binding AcknowledgeUnexpectedErrorCommand}" IsVisible="{Binding HasUnexpectedError}" />
+            <Button Content="{x:Static res:Strings.CancelButton}" Command="{Binding CancelCommand}" IsVisible="{Binding IsRunning}" />
+            <Button Content="{x:Static res:Strings.BackToStartButton}" Command="{Binding AcknowledgeCancelledCommand}" IsVisible="{Binding WasCancelled}" />
+            <Button Content="{x:Static res:Strings.BackToStartButton}" Command="{Binding AcknowledgeUnexpectedErrorCommand}" IsVisible="{Binding HasUnexpectedError}" />
         </StackPanel>
 
         <ScrollViewer>

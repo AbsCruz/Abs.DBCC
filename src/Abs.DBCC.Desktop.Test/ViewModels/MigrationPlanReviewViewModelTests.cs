@@ -36,7 +36,7 @@ public class MigrationPlanReviewViewModelTests
     }
 
     [Fact]
-    public async Task LoadPreflightAsync_PopulatesPreflightAndLogFileSizeDisplay()
+    public async Task LoadPreflightAsync_PopulatesPreflightAndTransactionLogDisplay()
     {
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
@@ -47,13 +47,13 @@ public class MigrationPlanReviewViewModelTests
 
         Assert.NotNull(vm.Preflight);
         Assert.Equal(1, vm.Preflight.OtherActiveSessionCount);
-        Assert.Contains("10", vm.LogFileSizeDisplay);
-        Assert.Contains("MB", vm.LogFileSizeDisplay);
-        Assert.Contains("50", vm.LogFileSizeDisplay);
+        Assert.Contains("10", vm.TransactionLogDisplay);
+        Assert.Contains("MB", vm.TransactionLogDisplay);
+        Assert.Contains("50", vm.TransactionLogDisplay);
     }
 
     [Fact]
-    public void LogFileSizeDisplay_WithoutPreflightLoaded_IsNull()
+    public void TransactionLogDisplay_WithoutPreflightLoaded_IsNull()
     {
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
@@ -61,7 +61,7 @@ public class MigrationPlanReviewViewModelTests
 
         var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
 
-        Assert.Null(vm.LogFileSizeDisplay);
+        Assert.Null(vm.TransactionLogDisplay);
     }
 
     [Fact]

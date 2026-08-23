@@ -1,4 +1,5 @@
 using System.Text;
+using Abs.DBCC.Desktop.Localization;
 using Abs.DBCC.Domain.Migration;
 using CommunityToolkit.Mvvm.Input;
 
@@ -22,33 +23,34 @@ public partial class MigrationResultViewModel(MigrationReport report) : ViewMode
     public string BuildReportText()
     {
         var text = new StringBuilder();
-        text.AppendLine($"Collation-Migration – {(Report.Succeeded ? "erfolgreich" : "fehlgeschlagen")}");
-        text.AppendLine($"Erstellt: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        text.AppendLine(string.Format(Strings.ReportHeaderFormat, Report.Succeeded ? Strings.ReportSucceededWord : Strings.ReportFailedWord));
+        text.AppendLine(string.Format(Strings.ReportCreatedFormat, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")));
 
         if (Report.FailureReason is not null)
         {
             text.AppendLine();
-            text.AppendLine($"Fehler: {Report.FailureReason}");
+            text.AppendLine(string.Format(Strings.ReportErrorFormat, Report.FailureReason));
         }
 
         text.AppendLine();
-        text.AppendLine("Schritte:");
+        text.AppendLine(Strings.ReportStepsLabel);
         foreach (var step in Report.StepResults)
         {
-            var status = step.Succeeded ? "OK" : "FEHLER";
+            var status = step.Succeeded ? Strings.ReportStepOk : Strings.ReportStepError;
             text.AppendLine($"  [{status}] {step.Step.Description}" + (step.Error is null ? "" : $" – {step.Error}"));
         }
 
         if (Report.Verification is not null)
         {
             text.AppendLine();
-            text.AppendLine($"Verifikation: {(Report.Verification.IsSuccess ? "keine Abweichungen" : "Abweichungen gefunden")}");
+            text.AppendLine(string.Format(Strings.ReportVerificationFormat,
+                Report.Verification.IsSuccess ? Strings.ReportNoDiscrepancies : Strings.ReportDiscrepanciesFound));
 
             foreach (var diff in Report.Verification.StructuralDiffs)
-                text.AppendLine($"  [Struktur] {diff.ObjectDescription}: {diff.Details}");
+                text.AppendLine($"  [{Strings.ReportStructuralLabel}] {diff.ObjectDescription}: {diff.Details}");
 
             foreach (var diff in Report.Verification.DataDiffs)
-                text.AppendLine($"  [Daten] {diff.TableDescription}: {diff.Details}");
+                text.AppendLine($"  [{Strings.ReportDataLabel}] {diff.TableDescription}: {diff.Details}");
         }
 
         return text.ToString();

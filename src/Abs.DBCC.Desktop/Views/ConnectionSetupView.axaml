@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Abs.DBCC.Desktop.ViewModels"
+             xmlns:res="using:Abs.DBCC.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="500" d:DesignHeight="450"
@@ -9,38 +10,38 @@
 
     <StackPanel Margin="24" Spacing="12" MaxWidth="420" HorizontalAlignment="Center">
 
-        <TextBlock Text="Verbindung zur Datenbank" FontSize="20" FontWeight="Bold" />
+        <TextBlock Text="{x:Static res:Strings.ConnectToDatabaseTitle}" FontSize="20" FontWeight="Bold" />
 
         <StackPanel Spacing="4">
-            <TextBlock Text="Server" />
-            <TextBox Text="{Binding Server}" PlaceholderText="z. B. localhost oder 192.168.1.10" />
+            <TextBlock Text="{x:Static res:Strings.ServerLabel}" />
+            <TextBox Text="{Binding Server}" PlaceholderText="{x:Static res:Strings.ServerPlaceholder}" />
         </StackPanel>
 
         <StackPanel Spacing="4">
-            <TextBlock Text="Datenbank" />
+            <TextBlock Text="{x:Static res:Strings.DatabaseLabel}" />
             <TextBox Text="{Binding Database}" />
         </StackPanel>
 
         <StackPanel Spacing="4">
-            <TextBlock Text="Benutzer" />
+            <TextBlock Text="{x:Static res:Strings.UserLabel}" />
             <TextBox Text="{Binding User}" />
         </StackPanel>
 
         <StackPanel Spacing="4">
-            <TextBlock Text="Passwort" />
+            <TextBlock Text="{x:Static res:Strings.PasswordLabel}" />
             <TextBox Text="{Binding Password}" PasswordChar="•" />
         </StackPanel>
 
-        <CheckBox Content="Serverzertifikat vertrauen (TrustServerCertificate)"
+        <CheckBox Content="{x:Static res:Strings.TrustServerCertificateLabel}"
                   IsChecked="{Binding TrustServerCertificate}" />
 
-        <Button Content="Verbindung testen"
+        <Button Content="{x:Static res:Strings.TestConnectionButton}"
                 Command="{Binding TestConnectionCommand}"
                 IsEnabled="{Binding !IsTesting}" />
 
         <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" />
 
-        <Button Content="Weiter"
+        <Button Content="{x:Static res:Strings.ContinueButton}"
                 Command="{Binding ContinueCommand}"
                 HorizontalAlignment="Right" />
 
