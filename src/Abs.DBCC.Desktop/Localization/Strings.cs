@@ -45,6 +45,9 @@ public static class Strings
     public static string TransactionLogFormat => L("Transaktionsprotokoll aktuell: {0}", "Transaction log currently: {0}");
     public static string LogFileSizeFormat => L("{0:F1} MB ({1:F1}% belegt)", "{0:F1} MB ({1:F1}% used)");
     public static string StartMigrationButton => L("Migration starten", "Start Migration");
+    public static string ExportScriptButton => L("Als SQL-Skript exportieren", "Export as SQL Script");
+    public static string SaveScriptDialogTitle => L("SQL-Skript speichern", "Save SQL Script");
+    public static string SqlScriptFileLabel => L("SQL-Skriptdatei", "SQL script file");
 
     // MigrationResultView
     public static string MigrationSucceededTitle => L("Migration erfolgreich", "Migration Succeeded");

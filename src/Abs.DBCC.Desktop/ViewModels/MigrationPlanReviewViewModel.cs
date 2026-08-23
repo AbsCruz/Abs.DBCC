@@ -43,6 +43,9 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
     public event EventHandler<(ConnectionProfile Profile, MigrationPlan Plan)>? StartRequested;
     public event EventHandler? BackRequested;
 
+    /// <summary>Raised with the generated T-SQL script; the view handles the actual save-file dialog.</summary>
+    public event EventHandler<string>? ScriptExportRequested;
+
     public MigrationPlanReviewViewModel(ISender sender, ConnectionProfile profile, MigrationPlan plan)
     {
         _sender = sender;
@@ -87,6 +90,10 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
 
     [RelayCommand]
     private void Start() => StartRequested?.Invoke(this, (_profile, Plan));
+
+    [RelayCommand]
+    private void ExportScript() =>
+        ScriptExportRequested?.Invoke(this, MigrationScriptGenerator.Generate(Plan, _profile.Database));
 
     [RelayCommand]
     private void Back() => BackRequested?.Invoke(this, EventArgs.Empty);

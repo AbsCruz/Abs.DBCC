@@ -81,4 +81,23 @@ public class MigrationPlanReviewViewModelTests
         Assert.Equal(Profile, raised.Value.Profile);
         Assert.Same(plan, raised.Value.Plan);
     }
+
+    [Fact]
+    public void ExportScriptCommand_RaisesScriptExportRequestedWithGeneratedScript()
+    {
+        var plan = Plan(new MigrationStep(0, MigrationStepKind.AlterColumnCollation, "alter", "ALTER TABLE ..."));
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0));
+        var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, plan);
+        string? script = null;
+        vm.ScriptExportRequested += (_, s) => script = s;
+
+        vm.ExportScriptCommand.Execute(null);
+
+        Assert.NotNull(script);
+        Assert.Contains("ALTER TABLE ...", script);
+        Assert.Contains("BEGIN TRANSACTION;", script);
+        Assert.Contains($"Database: {Profile.Database}", script);
+    }
 }

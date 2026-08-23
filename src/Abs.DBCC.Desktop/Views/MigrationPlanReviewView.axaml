@@ -29,6 +29,7 @@
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
             <Button Content="{x:Static res:Strings.BackButton}" Command="{Binding BackCommand}" />
+            <Button Content="{x:Static res:Strings.ExportScriptButton}" Command="{Binding ExportScriptCommand}" />
             <Button Content="{x:Static res:Strings.StartMigrationButton}" Command="{Binding StartCommand}" />
         </StackPanel>
 

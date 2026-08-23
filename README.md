@@ -25,6 +25,8 @@ blockiert, ändert die Spalten, und stellt anschließend alles exakt so wieder h
   -indizes, schema-gebundene Views/Funktionen, Trigger, Sequenzen, Synonyme, Berechtigungen
   (Datenbank-, Schema- und Objekt-/Spaltenebene) sowie Extended Properties
 - Optionaler Wechsel der Datenbank-Default-Collation (`ALTER DATABASE ... COLLATE`)
+- Export des Migrationsplans als eigenständiges T-SQL-Skript (statt Ausführung direkt aus der
+  Anwendung) – z. B. zur Prüfung durch einen DBA oder zur Ausführung über sqlcmd/SSMS
 - Pre-Flight-Check vor dem eigentlichen Lauf: andere aktive Verbindungen, geschätzte betroffene
   Zeilenanzahl, aktuelle Transaktionsprotokoll-Auslastung
 - Live-Fortschrittsanzeige mit Schritt-für-Schritt-Protokoll, Abbruch-Möglichkeit
@@ -110,7 +112,12 @@ dotnet test src/Abs.DBCC.IntegrationTest
 
 In der App werden Server, Datenbank, Benutzer und Passwort eingegeben, die Verbindung getestet, der
 aktuelle Collation-Report geprüft, eine Ziel-Collation ausgewählt und der generierte Migrationsplan
-vor dem Start noch einmal überprüft (inkl. Pre-Flight-Check).
+vor dem Start noch einmal überprüft (inkl. Pre-Flight-Check). Auf dieser letzten Seite kann statt
+„Migration starten“ auch „Als SQL-Skript exportieren“ gewählt werden: Die App erzeugt daraus ein
+eigenständiges `.sql`-Skript mit exakt denselben Schritten (inkl. der Aufteilung in Transaktionen,
+falls die Datenbank-Default-Collation mitgeändert wird) zum Speichern und späteren Ausführen über
+sqlcmd, SSMS oder ein beliebiges anderes Werkzeug – ohne dass die Anwendung selbst dabei verbunden
+sein muss.
 
 ### Veröffentlichen (self-contained, single-file)
 
@@ -160,6 +167,8 @@ alters the columns, and then restores everything exactly as it was before.
   indexes, schema-bound views/functions, triggers, sequences, synonyms, permissions (database,
   schema, and object/column level) as well as extended properties
 - Optional change of the database's default collation (`ALTER DATABASE ... COLLATE`)
+- Export the migration plan as a stand-alone T-SQL script (instead of running it from the
+  application) – e.g. for DBA review, or to run it via sqlcmd/SSMS
 - Pre-flight check before the actual run: other active connections, estimated affected row count,
   current transaction log usage
 - Live progress display with a step-by-step log, with the option to cancel
@@ -245,7 +254,11 @@ dotnet test src/Abs.DBCC.IntegrationTest
 
 In the app you enter the server, database, user, and password, test the connection, review the
 current collation report, pick a target collation, and review the generated migration plan once
-more before starting (including the pre-flight check). The UI itself displays in German or English
+more before starting (including the pre-flight check). On that last screen, instead of "Start
+Migration" you can also choose "Export as SQL Script": the app renders the exact same steps
+(including the transaction split, if the database default collation is being changed too) as a
+stand-alone `.sql` file to save and run later via sqlcmd, SSMS, or any other tool – without the
+application itself needing to stay connected. The UI itself displays in German or English
 automatically depending on your operating system's language setting.
 
 #### Publishing (self-contained, single-file)
