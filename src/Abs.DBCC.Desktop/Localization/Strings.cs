@@ -41,6 +41,7 @@ public static class Strings
     public static string AffectedTablesFormat => L("Betroffene Tabellen: {0}", "Affected tables: {0}");
     public static string CheckingActiveSessions => L("Prüfe aktive Sitzungen und Datenmenge...", "Checking active sessions and data volume...");
     public static string OtherActiveConnectionsFormat => L("Andere aktive Verbindungen zur Datenbank: {0}", "Other active connections to the database: {0}");
+    public static string RecheckActiveConnectionsButton => L("Erneut prüfen", "Check again");
     public static string EstimatedAffectedRowsFormat => L("Geschätzte Zeilen in betroffenen Tabellen: {0}", "Estimated rows in affected tables: {0}");
     public static string TransactionLogFormat => L("Transaktionsprotokoll aktuell: {0}", "Transaction log currently: {0}");
     public static string LogFileSizeFormat => L("{0:F1} MB ({1:F1}% belegt)", "{0:F1} MB ({1:F1}% used)");
