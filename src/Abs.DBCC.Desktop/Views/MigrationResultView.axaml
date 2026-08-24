@@ -18,8 +18,6 @@
             <TextBlock Text="{x:Static res:Strings.MigrationFailedTitle}"
                        FontSize="20" FontWeight="Bold" Foreground="Red"
                        IsVisible="{Binding !Report.Succeeded}" />
-            <TextBlock Text="{Binding Report.FailureReason}" Foreground="Red" />
-
             <TextBlock Text="{x:Static res:Strings.StructuralCheckSucceeded}"
                        Foreground="Green"
                        IsVisible="{Binding Report.Verification.IsSuccess}" />
@@ -35,6 +33,9 @@
 
         <ScrollViewer>
             <StackPanel Spacing="12">
+
+                <TextBlock Text="{Binding Report.FailureReason}" Foreground="Red" TextWrapping="Wrap"
+                           IsVisible="{Binding Report.FailureReason, Converter={x:Static ObjectConverters.IsNotNull}}" />
 
                 <ItemsControl ItemsSource="{Binding Report.Verification.StructuralDiffs}">
                     <ItemsControl.ItemTemplate>
