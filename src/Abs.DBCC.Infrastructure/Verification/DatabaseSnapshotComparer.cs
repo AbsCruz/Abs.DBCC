@@ -1,6 +1,7 @@
 using Abs.DBCC.Domain.Collation;
 using Abs.DBCC.Domain.Migration;
 using Abs.DBCC.Domain.Snapshot;
+using Abs.DBCC.Infrastructure.Migration.DdlScriptGenerators;
 
 namespace Abs.DBCC.Infrastructure.Verification;
 
@@ -30,7 +31,7 @@ public static class DatabaseSnapshotComparer
         CompareForeignKeys(before.ForeignKeys, after.ForeignKeys, diffs);
 
         CompareByName("Datenbank", "Objekt", before.ProgrammableObjects, after.ProgrammableObjects, o => o.Ref.ToString(),
-            (b, a) => b.DefinitionScript == a.DefinitionScript && b.IsSchemaBound == a.IsSchemaBound, diffs);
+            ProgrammableObjectsEqual, diffs);
 
         CompareByName("Datenbank", "Sequenz", before.Sequences, after.Sequences, s => s.Ref.ToString(),
             (b, a) => b == a, diffs);
@@ -52,6 +53,25 @@ public static class DatabaseSnapshotComparer
             (b, a) => IndexesEqual(b.Index, a.Index), diffs);
 
         return diffs;
+    }
+
+    private static bool ProgrammableObjectsEqual(ObjectDefinition before, ObjectDefinition after)
+    {
+        if (before.IsSchemaBound != after.IsSchemaBound)
+            return false;
+
+        if (before.DefinitionScript == after.DefinitionScript)
+            return true;
+
+        // The migration replays the object's captured definition through RawDefinitionScriptGenerator,
+        // which rewrites a stale header (a non-CREATE keyword because the object's last deployment used
+        // ALTER, or a name/schema mismatch after an sp_rename) to match its current identity before
+        // recreating it. An object whose original text needed that rewrite therefore legitimately comes
+        // back with different header text even though nothing about it actually changed - replaying the
+        // "before" text the same way the migration itself would is what tells a real difference apart
+        // from this expected, harmless rewrite.
+        var replayed = RawDefinitionScriptGenerator.GenerateCreate(new ObjectDefinition(after.Ref, before.DefinitionScript, before.IsSchemaBound));
+        return replayed == after.DefinitionScript;
     }
 
     private static string PermissionKey(PermissionSnapshot p) =>

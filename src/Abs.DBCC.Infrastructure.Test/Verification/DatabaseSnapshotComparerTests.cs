@@ -136,6 +136,33 @@ public class DatabaseSnapshotComparerTests
     }
 
     [Fact]
+    public void Compare_ViewLastModifiedWithAlter_ReplayedAsCreateAfterMigration_ProducesNoDiff()
+    {
+        // Reproduces a real-world false positive: the migration replays a schema-bound object's
+        // captured definition through RawDefinitionScriptGenerator, which rewrites a stale ALTER
+        // header to CREATE before recreating it. A raw text comparison would then flag every such
+        // object as "changed" even though nothing about it actually did - the comparer must replay
+        // the "before" text the same way the migration does before comparing.
+        var before = new DatabaseSnapshotBuilder().WithView("dbo", "V1", "ALTER VIEW dbo.V1 AS SELECT 1;", isSchemaBound: true).Build();
+        var after = new DatabaseSnapshotBuilder().WithView("dbo", "V1", "CREATE VIEW [dbo].[V1] AS SELECT 1;", isSchemaBound: true).Build();
+
+        var diffs = DatabaseSnapshotComparer.Compare(before, after, Target);
+
+        Assert.Empty(diffs);
+    }
+
+    [Fact]
+    public void Compare_ViewLastModifiedWithAlterAndBodyActuallyChanged_IsStillReported()
+    {
+        var before = new DatabaseSnapshotBuilder().WithView("dbo", "V1", "ALTER VIEW dbo.V1 AS SELECT 1;", isSchemaBound: true).Build();
+        var after = new DatabaseSnapshotBuilder().WithView("dbo", "V1", "CREATE VIEW [dbo].[V1] AS SELECT 2;", isSchemaBound: true).Build();
+
+        var diffs = DatabaseSnapshotComparer.Compare(before, after, Target);
+
+        Assert.Single(diffs);
+    }
+
+    [Fact]
     public void Compare_MissingSequenceAfterMigration_IsReported()
     {
         var before = new DatabaseSnapshotBuilder().WithSequence("dbo", "Numbers").Build();
