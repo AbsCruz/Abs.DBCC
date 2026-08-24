@@ -230,6 +230,88 @@ public class MigrationPlanBuilderTests
     }
 
     [Fact]
+    public void Build_SchemaBoundViewReferencingAnotherSchemaBoundView_DropsWrapperBeforeBaseAndRecreatesInReverse()
+    {
+        // Reproduces a real-world failure: an indexed base view directly referencing the changing
+        // column, wrapped by another schema-bound view that only references the base view (not the
+        // table). SchemaBoundDependencies alone would only find the base view; without resolving the
+        // wrapper's view-on-view reference too, DROP VIEW on the base view fails with SQL error 3729
+        // because the still-present wrapper still schema-binds to it.
+        var orders = new TableSnapshotBuilder("dbo", "Orders")
+            .WithColumn("Id", "int", null, isNullable: false)
+            .WithColumn("CustomerName", "varchar", Source.Value)
+            .Build();
+
+        var baseViewRef = new ObjectRef("dbo", "_vOrdersView", DatabaseObjectKind.View);
+        var wrapperViewRef = new ObjectRef("dbo", "vOrdersView", DatabaseObjectKind.View);
+
+        var snapshot = new DatabaseSnapshotBuilder()
+            .WithTable(orders)
+            .WithView("dbo", "_vOrdersView", "CREATE VIEW [dbo].[_vOrdersView] WITH SCHEMABINDING AS SELECT Id, CustomerName FROM dbo.Orders;", isSchemaBound: true)
+            .WithView("dbo", "vOrdersView", "CREATE VIEW [dbo].[vOrdersView] WITH SCHEMABINDING AS SELECT Id, CustomerName FROM dbo._vOrdersView;", isSchemaBound: true)
+            .WithSchemaBoundDependency(baseViewRef, orders.Ref, "CustomerName")
+            .WithSchemaBoundObjectReference(wrapperViewRef, baseViewRef)
+            .Build();
+
+        var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: false);
+        var steps = plan.Steps.ToList();
+
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("_vOrdersView"));
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("vOrdersView"));
+
+        var dropWrapper = steps.FindIndex(s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("[vOrdersView]"));
+        var dropBase = steps.FindIndex(s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("[_vOrdersView]"));
+        var addBase = steps.FindIndex(s => s.Kind == MigrationStepKind.AddSchemaBoundObject && s.Sql.Contains("[_vOrdersView]"));
+        var addWrapper = steps.FindIndex(s => s.Kind == MigrationStepKind.AddSchemaBoundObject && s.Sql.Contains("[vOrdersView]"));
+
+        Assert.True(dropWrapper < dropBase, "the wrapper view must be dropped before the base view it schema-binds to");
+        Assert.True(addBase < addWrapper, "the base view must be recreated before the wrapper view that references it");
+    }
+
+    [Fact]
+    public void Build_SchemaBoundFunctionReferencingTwoOtherSchemaBoundObjects_DoesNotThrowOnDuplicateKey()
+    {
+        // Regression test: a single dependent (here GetOrderSummary) can reference more than one other
+        // schema-bound object in its body. Building the "what does this object reference" lookup as a
+        // one-key-per-dependent Dictionary throws ArgumentException ("An item with the same key has
+        // already been added") the moment a dependent has two SchemaBoundObjectReferences rows - it must
+        // be a one-to-many lookup (grouped list), not a 1:1 dictionary.
+        var orders = new TableSnapshotBuilder("dbo", "Orders")
+            .WithColumn("Id", "int", null, isNullable: false)
+            .WithColumn("CustomerName", "varchar", Source.Value)
+            .Build();
+
+        var viewARef = new ObjectRef("dbo", "vOrdersA", DatabaseObjectKind.View);
+        var viewBRef = new ObjectRef("dbo", "vOrdersB", DatabaseObjectKind.View);
+        var functionRef = new ObjectRef("dbo", "GetOrderSummary", DatabaseObjectKind.Function);
+
+        var snapshot = new DatabaseSnapshotBuilder()
+            .WithTable(orders)
+            .WithView("dbo", "vOrdersA", "CREATE VIEW [dbo].[vOrdersA] WITH SCHEMABINDING AS SELECT Id, CustomerName FROM dbo.Orders;", isSchemaBound: true)
+            .WithView("dbo", "vOrdersB", "CREATE VIEW [dbo].[vOrdersB] WITH SCHEMABINDING AS SELECT Id, CustomerName FROM dbo.Orders;", isSchemaBound: true)
+            .WithFunction("dbo", "GetOrderSummary", "CREATE FUNCTION [dbo].[GetOrderSummary]() ... WITH SCHEMABINDING ...", isSchemaBound: true)
+            .WithSchemaBoundDependency(viewARef, orders.Ref, "CustomerName")
+            .WithSchemaBoundDependency(viewBRef, orders.Ref, "CustomerName")
+            .WithSchemaBoundObjectReference(functionRef, viewARef)
+            .WithSchemaBoundObjectReference(functionRef, viewBRef)
+            .Build();
+
+        var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: false);
+        var steps = plan.Steps.ToList();
+
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("GetOrderSummary"));
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("vOrdersA"));
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("vOrdersB"));
+
+        var dropFunction = steps.FindIndex(s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("GetOrderSummary"));
+        var dropViewA = steps.FindIndex(s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("[vOrdersA]"));
+        var dropViewB = steps.FindIndex(s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("[vOrdersB]"));
+
+        Assert.True(dropFunction < dropViewA, "the function must be dropped before either view it references");
+        Assert.True(dropFunction < dropViewB, "the function must be dropped before either view it references");
+    }
+
+    [Fact]
     public void Build_FullTextIndexCoveringChangingColumn_IsDroppedBeforeIndexesAndRecreatedAfter()
     {
         var articles = new TableSnapshotBuilder("dbo", "Articles")

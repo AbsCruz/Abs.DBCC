@@ -38,9 +38,10 @@ namespace Abs.DBCC.Infrastructure.Migration;
 /// A single global ordering of these phases (rather than a per-object topological sort) is sufficient
 /// for this object scope: nothing recreated in an earlier phase ever depends on something recreated in
 /// a later one (e.g. every foreign key is only added once all tables' columns/indexes already exist).
-/// If a later milestone adds objects with genuine cross-object dependencies (e.g. a schema-bound view
-/// referencing another schema-bound view), a real dependency graph will be needed for those - not for
-/// this scope, which only resolves direct table-column dependencies (sys.sql_expression_dependencies).
+/// The one exception is schema-bound views/functions that reference each other (e.g. an indexed
+/// wrapper view built WITH SCHEMABINDING on top of another schema-bound view): those are resolved with
+/// a proper dependency-closure and topological sort within their own phase - see
+/// <see cref="SchemaBoundObjectReference"/> and the ordering below.
 ///
 /// Plain (non-schema-bound) views/procedures/functions/triggers never block ALTER COLUMN in SQL Server
 /// and are therefore never touched here - they are only captured for structural verification.
@@ -65,10 +66,54 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 
         // WITH SCHEMABINDING views/functions are the only programmable objects that block ALTER COLUMN;
         // plain views/procedures/functions/triggers never block it and are left completely untouched.
-        var schemaBoundObjectsToDrop = snapshot.SchemaBoundDependencies
+        var directSchemaBoundDrops = snapshot.SchemaBoundDependencies
             .Where(dep => changingColumnsByTable.TryGetValue(dep.ReferencedTable, out var cols) && cols.Contains(dep.ReferencedColumn))
             .Select(dep => dep.DependentObject)
-            .Distinct()
+            .ToHashSet();
+
+        // A schema-bound object that itself references another schema-bound object being dropped (e.g.
+        // an indexed wrapper view built WITH SCHEMABINDING on top of another schema-bound view) must
+        // also be dropped/recreated around it - close over that chain, then order it so a dependent is
+        // dropped before what it references (and recreated after it).
+        var dependentsByReferenced = snapshot.SchemaBoundObjectReferences
+            .GroupBy(r => r.ReferencedObject)
+            .ToDictionary(g => g.Key, g => g.Select(r => r.DependentObject).ToList());
+
+        var schemaBoundRefsToDrop = new HashSet<ObjectRef>(directSchemaBoundDrops);
+        var pending = new Queue<ObjectRef>(directSchemaBoundDrops);
+        while (pending.TryDequeue(out var referenced))
+            foreach (var dependent in dependentsByReferenced.GetValueOrDefault(referenced, []))
+                if (schemaBoundRefsToDrop.Add(dependent))
+                    pending.Enqueue(dependent);
+
+        // One dependent can reference several other schema-bound objects (e.g. a function whose body
+        // calls two other schema-bound functions), so this is one-to-many, not one-to-one.
+        var referencedByDependent = snapshot.SchemaBoundObjectReferences
+            .GroupBy(r => r.DependentObject)
+            .ToDictionary(g => g.Key, g => g.Select(r => r.ReferencedObject).ToList());
+
+        // Post-order DFS: a node is only appended once everything it references (and is also being
+        // dropped) has already been appended - so this list is "referenced objects first, dependents
+        // last", i.e. exactly the RECREATE order. Reversed, it is the DROP order (dependents first).
+        var recreateOrder = new List<ObjectRef>();
+        var visited = new HashSet<ObjectRef>();
+
+        void VisitForRecreateOrder(ObjectRef node)
+        {
+            if (!visited.Add(node))
+                return;
+
+            foreach (var referenced in referencedByDependent.GetValueOrDefault(node, []))
+                if (schemaBoundRefsToDrop.Contains(referenced))
+                    VisitForRecreateOrder(referenced);
+
+            recreateOrder.Add(node);
+        }
+
+        foreach (var node in schemaBoundRefsToDrop)
+            VisitForRecreateOrder(node);
+
+        var schemaBoundObjectsToDrop = Enumerable.Reverse(recreateOrder)
             .Select(objRef => snapshot.ProgrammableObjects.First(o => o.Ref == objRef))
             .ToList();
 
@@ -205,8 +250,10 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 
         // Dropping and recreating a schema-bound view/function as a whole object loses any permissions
         // and extended properties scoped to it (or to its columns, or - for an indexed view - its
-        // indexes) - all must be replayed afterwards.
-        foreach (var obj in schemaBoundObjectsToDrop)
+        // indexes) - all must be replayed afterwards. Recreated in reverse of drop order, so an object
+        // that another dropped object references (e.g. the base view under an indexed wrapper view)
+        // exists again before its dependent is recreated.
+        foreach (var obj in Enumerable.Reverse(schemaBoundObjectsToDrop))
         {
             steps.Add(new MigrationStep(order++, MigrationStepKind.AddSchemaBoundObject, $"Schema-gebundenes Objekt {obj.Ref} wiederherstellen", RawDefinitionScriptGenerator.GenerateCreate(obj)));
 

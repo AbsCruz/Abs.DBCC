@@ -10,7 +10,7 @@ public class MigrationPlanTests
     private static readonly SqlCollationName Target = new("Latin1_General_100_CI_AS_SC_UTF8");
 
     private static readonly DatabaseSnapshot EmptySnapshot = new(
-        Source, [], [], [], [], [], [], [], [], [], [], []);
+        Source, [], [], [], [], [], [], [], [], [], [], [], []);
 
     private static readonly IReadOnlyList<ObjectRef> OneAffectedTable =
         [new ObjectRef("dbo", "Orders", DatabaseObjectKind.Table)];

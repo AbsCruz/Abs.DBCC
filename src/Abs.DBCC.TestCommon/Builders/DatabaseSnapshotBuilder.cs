@@ -9,6 +9,7 @@ public sealed class DatabaseSnapshotBuilder
     private readonly List<ForeignKeySnapshot> _foreignKeys = [];
     private readonly List<ObjectDefinition> _programmableObjects = [];
     private readonly List<SchemaBoundDependency> _schemaBoundDependencies = [];
+    private readonly List<SchemaBoundObjectReference> _schemaBoundObjectReferences = [];
     private readonly List<SequenceSnapshot> _sequences = [];
     private readonly List<SynonymSnapshot> _synonyms = [];
     private readonly List<FullTextCatalogSnapshot> _fullTextCatalogs = [];
@@ -69,6 +70,12 @@ public sealed class DatabaseSnapshotBuilder
     public DatabaseSnapshotBuilder WithSchemaBoundDependency(ObjectRef dependentObject, ObjectRef referencedTable, string referencedColumn)
     {
         _schemaBoundDependencies.Add(new SchemaBoundDependency(dependentObject, referencedTable, referencedColumn));
+        return this;
+    }
+
+    public DatabaseSnapshotBuilder WithSchemaBoundObjectReference(ObjectRef dependentObject, ObjectRef referencedObject)
+    {
+        _schemaBoundObjectReferences.Add(new SchemaBoundObjectReference(dependentObject, referencedObject));
         return this;
     }
 
@@ -134,6 +141,6 @@ public sealed class DatabaseSnapshotBuilder
     }
 
     public DatabaseSnapshot Build() => new(
-        _databaseCollation, _tables, _foreignKeys, _programmableObjects, _schemaBoundDependencies,
+        _databaseCollation, _tables, _foreignKeys, _programmableObjects, _schemaBoundDependencies, _schemaBoundObjectReferences,
         _sequences, _synonyms, _fullTextCatalogs, _fullTextIndexes, _permissions, _extendedProperties, _viewIndexes);
 }

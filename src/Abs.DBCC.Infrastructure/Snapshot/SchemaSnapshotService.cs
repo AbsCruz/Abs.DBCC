@@ -15,6 +15,7 @@ public sealed class SchemaSnapshotService(
     private readonly ForeignKeyReader _foreignKeyReader = new();
     private readonly ProgrammabilityReader _programmabilityReader = new();
     private readonly SchemaBoundDependencyReader _schemaBoundDependencyReader = new();
+    private readonly SchemaBoundObjectReferenceReader _schemaBoundObjectReferenceReader = new();
     private readonly SequenceReader _sequenceReader = new();
     private readonly SynonymReader _synonymReader = new();
     private readonly FullTextReader _fullTextReader = new();
@@ -33,6 +34,7 @@ public sealed class SchemaSnapshotService(
         var foreignKeys = await _foreignKeyReader.ReadAsync(runner, ct);
         var programmableObjects = await _programmabilityReader.ReadAsync(runner, ct);
         var schemaBoundDependencies = await _schemaBoundDependencyReader.ReadAsync(runner, ct);
+        var schemaBoundObjectReferences = await _schemaBoundObjectReferenceReader.ReadAsync(runner, ct);
         var sequences = await _sequenceReader.ReadAsync(runner, ct);
         var synonyms = await _synonymReader.ReadAsync(runner, ct);
         var fullTextCatalogs = await _fullTextReader.ReadCatalogsAsync(runner, ct);
@@ -50,7 +52,7 @@ public sealed class SchemaSnapshotService(
             .ToList();
 
         return new DatabaseSnapshot(
-            databaseCollation, tables, foreignKeys, programmableObjects, schemaBoundDependencies,
+            databaseCollation, tables, foreignKeys, programmableObjects, schemaBoundDependencies, schemaBoundObjectReferences,
             sequences, synonyms, fullTextCatalogs, fullTextIndexes, permissions, extendedProperties, viewIndexes);
     }
 }

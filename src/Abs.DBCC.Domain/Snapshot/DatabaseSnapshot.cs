@@ -8,6 +8,7 @@ public sealed record DatabaseSnapshot(
     IReadOnlyList<ForeignKeySnapshot> ForeignKeys,
     IReadOnlyList<ObjectDefinition> ProgrammableObjects,
     IReadOnlyList<SchemaBoundDependency> SchemaBoundDependencies,
+    IReadOnlyList<SchemaBoundObjectReference> SchemaBoundObjectReferences,
     IReadOnlyList<SequenceSnapshot> Sequences,
     IReadOnlyList<SynonymSnapshot> Synonyms,
     IReadOnlyList<FullTextCatalogSnapshot> FullTextCatalogs,
