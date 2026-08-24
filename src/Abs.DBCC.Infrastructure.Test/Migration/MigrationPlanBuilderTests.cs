@@ -449,6 +449,48 @@ public class MigrationPlanBuilderTests
     }
 
     [Fact]
+    public void Build_IndexedViewWithClusteredAndNonclusteredIndex_RecreatesClusteredFirstAndDropsClusteredLast()
+    {
+        // Reproduces a real-world failure: an indexed view had both its materializing unique
+        // clustered index and an additional nonclustered index. Iterating the view's indexes in
+        // whatever order the snapshot happened to list them in (here deliberately the reverse of
+        // clustered-first, to make sure the fix doesn't just get lucky with alphabetical naming)
+        // put the nonclustered CREATE INDEX before the clustered one, which SQL Server rejects
+        // because a nonclustered index cannot be created on an indexed view before its one unique
+        // clustered index exists. Symmetrically, dropping the clustered index while the
+        // nonclustered one still exists is also rejected.
+        var products = new TableSnapshotBuilder("dbo", "Products")
+            .WithColumn("Id", "int", null, isNullable: false)
+            .WithColumn("Name", "varchar", Source.Value)
+            .Build();
+
+        var viewRef = new ObjectRef("dbo", "ProductSummaryView", DatabaseObjectKind.View);
+        var nonclusteredIndex = new IndexSnapshot(
+            "IX_ProductSummaryView_Name", false, false, false, false, [new IndexColumnSnapshot("Name", false, false)], null);
+        var clusteredIndex = new IndexSnapshot(
+            "UQ_ProductSummaryView_Id", true, true, false, false, [new IndexColumnSnapshot("Id", false, false)], null);
+
+        var snapshot = new DatabaseSnapshotBuilder()
+            .WithTable(products)
+            .WithView("dbo", "ProductSummaryView", "CREATE VIEW [dbo].[ProductSummaryView] WITH SCHEMABINDING AS SELECT Id, Name FROM dbo.Products;", isSchemaBound: true)
+            .WithSchemaBoundDependency(viewRef, products.Ref, "Name")
+            .WithViewIndex(viewRef, nonclusteredIndex)
+            .WithViewIndex(viewRef, clusteredIndex)
+            .Build();
+
+        var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: false);
+        var steps = plan.Steps.ToList();
+
+        var dropNonclustered = steps.FindIndex(s => s.Kind == MigrationStepKind.DropIndex && s.Sql.Contains("IX_ProductSummaryView_Name"));
+        var dropClustered = steps.FindIndex(s => s.Kind == MigrationStepKind.DropIndex && s.Sql.Contains("UQ_ProductSummaryView_Id"));
+        var addClustered = steps.FindIndex(s => s.Kind == MigrationStepKind.CreateIndex && s.Sql.Contains("UQ_ProductSummaryView_Id"));
+        var addNonclustered = steps.FindIndex(s => s.Kind == MigrationStepKind.CreateIndex && s.Sql.Contains("IX_ProductSummaryView_Name"));
+
+        Assert.True(dropNonclustered < dropClustered, "the nonclustered index must be dropped before the clustered index that materializes the view");
+        Assert.True(addClustered < addNonclustered, "the clustered index must be recreated before any nonclustered index on the same view");
+    }
+
+    [Fact]
     public void Build_SchemaBoundViewReferencingAnotherSchemaBoundView_DropsWrapperBeforeBaseAndRecreatesInReverse()
     {
         // Reproduces a real-world failure: an indexed base view directly referencing the changing

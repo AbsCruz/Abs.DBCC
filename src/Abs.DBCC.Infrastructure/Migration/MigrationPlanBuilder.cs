@@ -63,6 +63,12 @@ namespace Abs.DBCC.Infrastructure.Migration;
 /// computed column, a constraint is never itself the *target* a schema-bound view depends on, so moving
 /// it earlier is always safe.
 ///
+/// An indexed view's own indexes are always ordered clustered-first for recreate (nonclustered-first for
+/// drop) within their own foreach loop, regardless of whatever order the snapshot happens to list them
+/// in: SQL Server refuses to create a nonclustered index on an indexed view before its one unique
+/// clustered index (the index that actually materializes the view) exists, and refuses to drop that
+/// clustered index while any nonclustered index on the same view still exists.
+///
 /// Plain (non-schema-bound) views/procedures/functions/triggers never block ALTER COLUMN in SQL Server
 /// and are therefore never touched here - they are only captured for structural verification.
 ///
@@ -265,8 +271,11 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
                 var obj = SchemaBoundObjectFor(objRef);
 
                 // An indexed view's own indexes must go before the view itself (SQL Server refuses to
-                // DROP VIEW while it still has an index, exactly like a table).
-                foreach (var vi in viewIndexesByView.GetValueOrDefault(obj.Ref, []))
+                // DROP VIEW while it still has an index, exactly like a table). Its nonclustered indexes
+                // must also go before its one unique clustered index (the index that actually
+                // materializes the view) - SQL Server refuses to drop that one while any nonclustered
+                // index on the same view still exists.
+                foreach (var vi in viewIndexesByView.GetValueOrDefault(obj.Ref, []).OrderBy(vi => vi.Index.IsClustered))
                     steps.Add(new MigrationStep(order++, MigrationStepKind.DropIndex, $"Index {SqlIdentifier.QuotePart(vi.Index.Name)} auf indizierter View {obj.Ref} entfernen", IndexScriptGenerator.GenerateDrop(obj.Ref, vi.Index)));
 
                 steps.Add(new MigrationStep(order++, MigrationStepKind.DropSchemaBoundObject, $"Schema-gebundenes Objekt {obj.Ref} entfernen", RawDefinitionScriptGenerator.GenerateDrop(obj)));
@@ -362,7 +371,12 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
                 foreach (var prop in snapshot.ExtendedProperties.Where(p => p.Object == obj.Ref))
                     steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {obj.Ref} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
 
-                foreach (var vi in viewIndexesByView.GetValueOrDefault(obj.Ref, []))
+                // The one unique clustered index (the index that actually materializes the view) must be
+                // created before any nonclustered index on the same view - SQL Server refuses to create
+                // a nonclustered index on an indexed view that doesn't have its unique clustered index
+                // yet, and nothing guarantees viewIndexesByView happens to already list it first (e.g.
+                // it can easily sort after a nonclustered index alphabetically by name).
+                foreach (var vi in viewIndexesByView.GetValueOrDefault(obj.Ref, []).OrderByDescending(vi => vi.Index.IsClustered))
                 {
                     steps.Add(new MigrationStep(order++, MigrationStepKind.CreateIndex, $"Index {SqlIdentifier.QuotePart(vi.Index.Name)} auf indizierter View {obj.Ref} wiederherstellen", IndexScriptGenerator.GenerateCreate(obj.Ref, vi.Index)));
 
