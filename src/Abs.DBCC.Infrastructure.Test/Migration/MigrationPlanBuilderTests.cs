@@ -250,6 +250,101 @@ public class MigrationPlanBuilderTests
     }
 
     [Fact]
+    public void Build_ComputedColumnCallingSchemaBoundFunction_DropsColumnBeforeFunctionAndRecreatesAfter()
+    {
+        // Unlike a check/default constraint, a computed column can also be the *target* a schema-bound
+        // view depends on (see the next test) - so it cannot simply always move earlier like a
+        // constraint. This is the "calls a function" direction: the column must still be dropped before
+        // the function it calls, and only recreated once that function exists again.
+        var orders = new TableSnapshotBuilder("dbo", "Orders")
+            .WithColumn("Name", "varchar", Source.Value)
+            .Build();
+
+        var log = new TableSnapshotBuilder("dbo", "RegistrationLog")
+            .WithColumn("Id", "int", null, isNullable: false)
+            .WithComputedColumn("IsValidFlag", "dbo.GetMinRegistrationDate()")
+            .Build();
+
+        var functionRef = new ObjectRef("dbo", "GetMinRegistrationDate", DatabaseObjectKind.Function);
+        var snapshot = new DatabaseSnapshotBuilder()
+            .WithTable(orders)
+            .WithTable(log)
+            .WithFunction("dbo", "GetMinRegistrationDate", "CREATE FUNCTION [dbo].[GetMinRegistrationDate]() WITH SCHEMABINDING RETURNS DATETIME AS BEGIN RETURN '2000-01-01'; END;", isSchemaBound: true)
+            .WithComputedColumnObjectReference(log.Ref, "IsValidFlag", functionRef)
+            .Build();
+
+        var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: true);
+        var steps = plan.Steps.ToList();
+
+        var dropColumn = steps.FindIndex(s => s.Kind == MigrationStepKind.DropComputedColumn && s.Sql.Contains("IsValidFlag"));
+        var dropFunction = steps.FindIndex(s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("GetMinRegistrationDate"));
+        var addFunction = steps.FindIndex(s => s.Kind == MigrationStepKind.AddSchemaBoundObject && s.Sql.Contains("GetMinRegistrationDate"));
+        var addColumn = steps.FindIndex(s => s.Kind == MigrationStepKind.AddComputedColumn && s.Sql.Contains("IsValidFlag"));
+
+        Assert.True(dropColumn >= 0 && dropFunction >= 0 && addFunction >= 0 && addColumn >= 0);
+        Assert.True(dropColumn < dropFunction, "the computed column must be dropped before the function it calls");
+        Assert.True(addFunction < addColumn, "the function must be recreated before the computed column that calls it");
+    }
+
+    [Fact]
+    public void Build_ComputedColumnSelectedBySchemaBoundView_DropsViewBeforeColumnAndRecreatesAfter()
+    {
+        // The opposite direction from the previous test: here the computed column is the target a
+        // schema-bound view depends on, so the view must be dropped first (and only recreated once the
+        // column exists again) - exactly the pre-existing behavior, now going through the same combined
+        // ordering machinery as the "calls a function" direction.
+        var log = new TableSnapshotBuilder("dbo", "RegistrationLog")
+            .WithColumn("Id", "int", null, isNullable: false)
+            .WithComputedColumn("Label", "'fixed'")
+            .Build();
+
+        var viewRef = new ObjectRef("dbo", "RegistrationLogSummary", DatabaseObjectKind.View);
+        var snapshot = new DatabaseSnapshotBuilder()
+            .WithTable(log)
+            .WithView("dbo", "RegistrationLogSummary", "CREATE VIEW [dbo].[RegistrationLogSummary] WITH SCHEMABINDING AS SELECT Id, Label FROM dbo.RegistrationLog;", isSchemaBound: true)
+            .WithSchemaBoundDependency(viewRef, log.Ref, "Label")
+            .Build();
+
+        var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: true);
+        var steps = plan.Steps.ToList();
+
+        var dropView = steps.FindIndex(s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("RegistrationLogSummary"));
+        var dropColumn = steps.FindIndex(s => s.Kind == MigrationStepKind.DropComputedColumn && s.Sql.Contains("Label"));
+        var addColumn = steps.FindIndex(s => s.Kind == MigrationStepKind.AddComputedColumn && s.Sql.Contains("Label"));
+        var addView = steps.FindIndex(s => s.Kind == MigrationStepKind.AddSchemaBoundObject && s.Sql.Contains("RegistrationLogSummary"));
+
+        Assert.True(dropView >= 0 && dropColumn >= 0 && addColumn >= 0 && addView >= 0);
+        Assert.True(dropView < dropColumn, "the view must be dropped before the computed column it selects");
+        Assert.True(addColumn < addView, "the computed column must be recreated before the view that selects it");
+    }
+
+    [Fact]
+    public void Build_ComputedColumnWithNoSchemaBoundRelationship_StillDropsAfterItsOwnIndexAndRecreatesBeforeIt()
+    {
+        // A computed column untouched by any schema-bound relationship keeps its original, simpler
+        // ordering relative to a regular index built on it - unaffected by the combined phase above.
+        var log = new TableSnapshotBuilder("dbo", "RegistrationLog")
+            .WithColumn("Id", "int", null, isNullable: false)
+            .WithComputedColumn("Label", "'fixed'", persisted: true)
+            .WithIndex("IX_RegistrationLog_Label", ["Label"])
+            .Build();
+
+        var snapshot = new DatabaseSnapshotBuilder().WithTable(log).Build();
+
+        var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: true);
+        var steps = plan.Steps.ToList();
+
+        var dropIndex = steps.FindIndex(s => s.Kind == MigrationStepKind.DropIndex && s.Sql.Contains("IX_RegistrationLog_Label"));
+        var dropColumn = steps.FindIndex(s => s.Kind == MigrationStepKind.DropComputedColumn && s.Sql.Contains("Label"));
+        var addColumn = steps.FindIndex(s => s.Kind == MigrationStepKind.AddComputedColumn && s.Sql.Contains("Label"));
+        var addIndex = steps.FindIndex(s => s.Kind == MigrationStepKind.CreateIndex && s.Sql.Contains("IX_RegistrationLog_Label"));
+
+        Assert.True(dropIndex >= 0 && dropColumn >= 0 && addColumn >= 0 && addIndex >= 0);
+        Assert.True(dropIndex < dropColumn, "the index must be dropped before the computed column it covers");
+        Assert.True(addColumn < addIndex, "the computed column must be recreated before the index that covers it");
+    }
+
+    [Fact]
     public void Build_ForeignKeyOnNonChangingColumns_IsNotTouched()
     {
         var orders = new TableSnapshotBuilder("dbo", "Orders")

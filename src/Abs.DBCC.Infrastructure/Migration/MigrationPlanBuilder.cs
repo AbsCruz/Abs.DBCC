@@ -12,15 +12,17 @@ namespace Abs.DBCC.Infrastructure.Migration;
 /// Pure planning logic (no I/O): decides which objects must be dropped, which columns altered, and
 /// which objects recreated, then emits the steps as one fixed sequence of phases:
 ///
-///   drop check -> drop default -> drop indexed-view's indexes -> drop schema-bound view/function ->
-///   drop full-text index -> drop FK -> drop index/PK/UQ [+ its extended properties captured for
-///   reapply] -> drop computed column
+///   drop check -> drop default -> drop indexed-view's indexes/schema-bound view/function/computed
+///   column [combined, dependency-safe order - see below] -> drop full-text index -> drop FK -> drop
+///   index/PK/UQ [+ its extended properties captured for reapply] -> drop remaining computed column
+///   (one with no schema-bound relationship)
 ///   -> alter column collation
 ///   -> (optional) alter database default collation
-///   -> add computed column [+ its extended properties] -> add index/PK/UQ [+ its extended properties]
-///   -> add FK [+ its extended properties] -> add full-text index -> add schema-bound view/function
-///   [+ its permissions/extended properties] -> add indexed-view's indexes [+ their extended
-///   properties] -> add default [+ its extended properties] -> add check [+ its extended properties]
+///   -> add remaining computed column [+ its extended properties] -> add index/PK/UQ [+ its extended
+///   properties] -> add FK [+ its extended properties] -> add full-text index -> add indexed-view's
+///   indexes/schema-bound view/function/computed column [combined, reverse of the drop order, + its
+///   permissions/extended properties] -> add default [+ its extended properties] -> add check [+ its
+///   extended properties]
 ///
 /// ALTER DATABASE ... COLLATE is deliberately placed BEFORE the recreate phase, not after it: SQL
 /// Server refuses to change the database's default collation while any object created without an
@@ -36,17 +38,30 @@ namespace Abs.DBCC.Infrastructure.Migration;
 /// the object itself is dropped).
 ///
 /// A single global ordering of these phases (rather than a per-object topological sort) is sufficient
-/// for this object scope: nothing recreated in an earlier phase ever depends on something recreated in
-/// a later one (e.g. every foreign key is only added once all tables' columns/indexes already exist).
-/// There are two exceptions. Schema-bound views/functions that reference each other (e.g. an indexed
-/// wrapper view built WITH SCHEMABINDING on top of another schema-bound view) are resolved with a
-/// proper dependency-closure and topological sort within their own phase - see
-/// <see cref="SchemaBoundObjectReference"/> and the ordering below. And check/default constraints are
-/// dropped before, and recreated after, schema-bound objects (not simply grouped with the other
-/// column-level constraints): their expression can call a schema-bound function, which SQL Server
-/// then refuses to drop while the constraint still references it (just like the view-on-view case,
-/// but for a constraint referencing a function) - and unlike a computed column, a constraint is never
-/// itself the *target* a schema-bound view depends on, so moving it earlier is always safe.
+/// for most of this object scope: nothing recreated in an earlier phase ever depends on something
+/// recreated in a later one (e.g. every foreign key is only added once all tables' columns/indexes
+/// already exist). There are exceptions, resolved with a proper dependency-closure and topological sort
+/// within their own combined phase instead:
+///
+///  - Schema-bound views/functions that reference each other (e.g. an indexed wrapper view built WITH
+///    SCHEMABINDING on top of another schema-bound view) - see <see cref="SchemaBoundObjectReference"/>.
+///  - A computed column that is referenced by a schema-bound view/function being dropped (the column
+///    must survive until that view/function is gone) or whose own expression calls a schema-bound
+///    function being dropped (the column must be gone before that function is) - see
+///    <see cref="ComputedColumnObjectReference"/>. Only computed columns actually touching a
+///    to-be-dropped schema-bound object join this combined phase; every other computed column keeps its
+///    original, simpler position (dropped after regular indexes so an index built on it is gone first,
+///    recreated before them so the column exists again first) - a computed column that is BOTH covered
+///    by a regular index AND tied to a schema-bound object in this way is a further, unhandled
+///    combination (rare in practice: SQL Server requires a persisted/indexed computed column's
+///    expression to be deterministic, which a call to an ordinary scalar function usually is not).
+///
+/// Check/default constraints are dropped before, and recreated after, the entire combined phase above
+/// (not simply grouped with the other column-level constraints): their expression can call a
+/// schema-bound function, which SQL Server then refuses to drop while the constraint still references
+/// it (the same class of problem as above, but for a constraint referencing a function) - and unlike a
+/// computed column, a constraint is never itself the *target* a schema-bound view depends on, so moving
+/// it earlier is always safe.
 ///
 /// Plain (non-schema-bound) views/procedures/functions/triggers never block ALTER COLUMN in SQL Server
 /// and are therefore never touched here - they are only captured for structural verification.
@@ -90,8 +105,9 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 
         // A schema-bound object that itself references another schema-bound object being dropped (e.g.
         // an indexed wrapper view built WITH SCHEMABINDING on top of another schema-bound view) must
-        // also be dropped/recreated around it - close over that chain, then order it so a dependent is
-        // dropped before what it references (and recreated after it).
+        // also be dropped/recreated around it - close over that chain first (computed columns never
+        // trigger *discovering* an extra schema-bound object to drop, only affect ordering, so this
+        // closure is schema-bound-to-schema-bound only).
         var dependentsByReferenced = snapshot.SchemaBoundObjectReferences
             .GroupBy(r => r.ReferencedObject)
             .ToDictionary(g => g.Key, g => g.Select(r => r.DependentObject).ToList());
@@ -102,37 +118,6 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
             foreach (var dependent in dependentsByReferenced.GetValueOrDefault(referenced, []))
                 if (schemaBoundRefsToDrop.Add(dependent))
                     pending.Enqueue(dependent);
-
-        // One dependent can reference several other schema-bound objects (e.g. a function whose body
-        // calls two other schema-bound functions), so this is one-to-many, not one-to-one.
-        var referencedByDependent = snapshot.SchemaBoundObjectReferences
-            .GroupBy(r => r.DependentObject)
-            .ToDictionary(g => g.Key, g => g.Select(r => r.ReferencedObject).ToList());
-
-        // Post-order DFS: a node is only appended once everything it references (and is also being
-        // dropped) has already been appended - so this list is "referenced objects first, dependents
-        // last", i.e. exactly the RECREATE order. Reversed, it is the DROP order (dependents first).
-        var recreateOrder = new List<ObjectRef>();
-        var visited = new HashSet<ObjectRef>();
-
-        void VisitForRecreateOrder(ObjectRef node)
-        {
-            if (!visited.Add(node))
-                return;
-
-            foreach (var referenced in referencedByDependent.GetValueOrDefault(node, []))
-                if (schemaBoundRefsToDrop.Contains(referenced))
-                    VisitForRecreateOrder(referenced);
-
-            recreateOrder.Add(node);
-        }
-
-        foreach (var node in schemaBoundRefsToDrop)
-            VisitForRecreateOrder(node);
-
-        var schemaBoundObjectsToDrop = Enumerable.Reverse(recreateOrder)
-            .Select(objRef => snapshot.ProgrammableObjects.First(o => o.Ref == objRef))
-            .ToList();
 
         var viewIndexesByView = snapshot.ViewIndexes.GroupBy(vi => vi.View).ToDictionary(g => g.Key, g => g.ToList());
 
@@ -158,9 +143,17 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
         {
             var changingColumns = changingColumnsByTable.GetValueOrDefault(table.Ref, []);
 
+            // Computed first: an index covering one of these (below) must be dropped regardless of its
+            // own filter/changing-column status, because the column underneath it is about to go.
+            var droppedComputedColumnNames = table.Columns
+                .Where(col => col.IsComputed && (updateDatabaseDefaultCollation || ReferencesAnyColumn(null, col.ComputedDefinition ?? "", changingColumns)))
+                .Select(col => col.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             indexesToDrop.AddRange(table.Indexes
                 .Where(index => changingColumns.Any(index.CoversColumn) ||
-                                 (updateDatabaseDefaultCollation && index.FilterDefinition is not null))
+                                 (updateDatabaseDefaultCollation && index.FilterDefinition is not null) ||
+                                 droppedComputedColumnNames.Any(index.CoversColumn))
                 .Select(index => (table, index)));
 
             checksToDrop.AddRange(table.CheckConstraints
@@ -172,10 +165,83 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
                 .Select(def => (table, def)));
 
             computedColumnsToDrop.AddRange(table.Columns
-                .Where(col => col.IsComputed &&
-                              (updateDatabaseDefaultCollation || ReferencesAnyColumn(null, col.ComputedDefinition ?? "", changingColumns)))
+                .Where(col => droppedComputedColumnNames.Contains(col.Name))
                 .Select(col => (table, col)));
         }
+
+        // Of all computed columns being dropped, only the ones that actually touch a to-be-dropped
+        // schema-bound object (in either direction) need to join its combined ordering phase below -
+        // every other computed column keeps its simpler, original position relative to regular indexes
+        // (see the class doc comment for why these two concerns don't otherwise interleave).
+        var computedColumnKeys = computedColumnsToDrop.ToDictionary(x => (x.Table.Ref, x.Column.Name), x => x);
+
+        var computedColumnsCalledBySchemaBound = snapshot.SchemaBoundDependencies
+            .Where(dep => schemaBoundRefsToDrop.Contains(dep.DependentObject) && computedColumnKeys.ContainsKey((dep.ReferencedTable, dep.ReferencedColumn)))
+            .ToList();
+
+        var computedColumnsCallingSchemaBound = snapshot.ComputedColumnObjectReferences
+            .Where(r => computedColumnKeys.ContainsKey((r.Table, r.ColumnName)) && schemaBoundRefsToDrop.Contains(r.ReferencedObject))
+            .ToList();
+
+        var computedColumnKeysInCombinedPhase = computedColumnsCalledBySchemaBound.Select(dep => (dep.ReferencedTable, dep.ReferencedColumn))
+            .Concat(computedColumnsCallingSchemaBound.Select(r => (r.Table, r.ColumnName)))
+            .ToHashSet();
+
+        var computedColumnsOutsideCombinedPhase = computedColumnsToDrop
+            .Where(x => !computedColumnKeysInCombinedPhase.Contains((x.Table.Ref, x.Column.Name)))
+            .ToList();
+
+        // The combined phase's own node set and edges: schema-bound objects (from SchemaBoundObjectReferences)
+        // plus the computed columns just identified above (from the two dependency sources just built).
+        // "dependent -> referenced" means dependent must be dropped before, and recreated after, referenced.
+        var combinedNodes = new HashSet<GraphNode>(schemaBoundRefsToDrop.Select(GraphNode.ForSchemaBoundObject));
+        foreach (var key in computedColumnKeysInCombinedPhase)
+            combinedNodes.Add(GraphNode.ForComputedColumn(key.Item1, key.Item2));
+
+        var edgesByDependent = new Dictionary<GraphNode, List<GraphNode>>();
+        void AddEdge(GraphNode dependent, GraphNode referenced)
+        {
+            if (!edgesByDependent.TryGetValue(dependent, out var list))
+                edgesByDependent[dependent] = list = [];
+            list.Add(referenced);
+        }
+
+        // One dependent can reference several other nodes (e.g. a function whose body calls two other
+        // schema-bound functions), so all of this is one-to-many, not one-to-one.
+        foreach (var r in snapshot.SchemaBoundObjectReferences)
+            if (schemaBoundRefsToDrop.Contains(r.DependentObject) && schemaBoundRefsToDrop.Contains(r.ReferencedObject))
+                AddEdge(GraphNode.ForSchemaBoundObject(r.DependentObject), GraphNode.ForSchemaBoundObject(r.ReferencedObject));
+
+        foreach (var dep in computedColumnsCalledBySchemaBound)
+            AddEdge(GraphNode.ForSchemaBoundObject(dep.DependentObject), GraphNode.ForComputedColumn(dep.ReferencedTable, dep.ReferencedColumn));
+
+        foreach (var r in computedColumnsCallingSchemaBound)
+            AddEdge(GraphNode.ForComputedColumn(r.Table, r.ColumnName), GraphNode.ForSchemaBoundObject(r.ReferencedObject));
+
+        // Post-order DFS: a node is only appended once everything it references (and is also being
+        // dropped) has already been appended - so this list is "referenced nodes first, dependents
+        // last", i.e. exactly the RECREATE order. Reversed, it is the DROP order (dependents first).
+        var combinedRecreateOrder = new List<GraphNode>();
+        var visited = new HashSet<GraphNode>();
+
+        void VisitForRecreateOrder(GraphNode node)
+        {
+            if (!visited.Add(node))
+                return;
+
+            foreach (var referenced in edgesByDependent.GetValueOrDefault(node, []))
+                if (combinedNodes.Contains(referenced))
+                    VisitForRecreateOrder(referenced);
+
+            combinedRecreateOrder.Add(node);
+        }
+
+        foreach (var node in combinedNodes)
+            VisitForRecreateOrder(node);
+
+        var combinedDropOrder = Enumerable.Reverse(combinedRecreateOrder).ToList();
+
+        ObjectDefinition SchemaBoundObjectFor(ObjectRef objRef) => snapshot.ProgrammableObjects.First(o => o.Ref == objRef);
 
         IEnumerable<ExtendedPropertySnapshot> ExtendedPropsFor(ObjectRef parentTable, DatabaseObjectKind kind, string name) =>
             snapshot.ExtendedProperties.Where(p =>
@@ -183,7 +249,7 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 
         // Phase 1: drop everything that would block ALTER COLUMN, in dependency-safe order.
         //
-        // Check/default constraints go first, before schema-bound objects: their expression can call a
+        // Check/default constraints go first, before the combined phase: their expression can call a
         // schema-bound function that is about to be dropped below, and a constraint is never itself
         // something a schema-bound view/function depends on, so this is always safe.
         foreach (var (table, check) in checksToDrop)
@@ -192,14 +258,24 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
         foreach (var (table, def) in defaultsToDrop)
             steps.Add(new MigrationStep(order++, MigrationStepKind.DropDefaultConstraint, $"Default-Constraint {SqlIdentifier.QuotePart(def.Name)} auf {table.Ref} entfernen", DefaultConstraintScriptGenerator.GenerateDrop(table.Ref, def)));
 
-        foreach (var obj in schemaBoundObjectsToDrop)
+        foreach (var node in combinedDropOrder)
         {
-            // An indexed view's own indexes must go before the view itself (SQL Server refuses to DROP
-            // VIEW while it still has an index, exactly like a table).
-            foreach (var vi in viewIndexesByView.GetValueOrDefault(obj.Ref, []))
-                steps.Add(new MigrationStep(order++, MigrationStepKind.DropIndex, $"Index {SqlIdentifier.QuotePart(vi.Index.Name)} auf indizierter View {obj.Ref} entfernen", IndexScriptGenerator.GenerateDrop(obj.Ref, vi.Index)));
+            if (node.SchemaBoundObject is { } objRef)
+            {
+                var obj = SchemaBoundObjectFor(objRef);
 
-            steps.Add(new MigrationStep(order++, MigrationStepKind.DropSchemaBoundObject, $"Schema-gebundenes Objekt {obj.Ref} entfernen", RawDefinitionScriptGenerator.GenerateDrop(obj)));
+                // An indexed view's own indexes must go before the view itself (SQL Server refuses to
+                // DROP VIEW while it still has an index, exactly like a table).
+                foreach (var vi in viewIndexesByView.GetValueOrDefault(obj.Ref, []))
+                    steps.Add(new MigrationStep(order++, MigrationStepKind.DropIndex, $"Index {SqlIdentifier.QuotePart(vi.Index.Name)} auf indizierter View {obj.Ref} entfernen", IndexScriptGenerator.GenerateDrop(obj.Ref, vi.Index)));
+
+                steps.Add(new MigrationStep(order++, MigrationStepKind.DropSchemaBoundObject, $"Schema-gebundenes Objekt {obj.Ref} entfernen", RawDefinitionScriptGenerator.GenerateDrop(obj)));
+            }
+            else if (node.ComputedColumn is { } key)
+            {
+                var (table, column) = computedColumnKeys[key];
+                steps.Add(new MigrationStep(order++, MigrationStepKind.DropComputedColumn, $"Berechnete Spalte {SqlIdentifier.QuotePart(column.Name)} auf {table.Ref} entfernen", ComputedColumnScriptGenerator.GenerateDrop(table.Ref, column)));
+            }
         }
 
         // Full-text indexes are dropped before regular indexes: a full-text index depends on its
@@ -214,7 +290,9 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
         foreach (var (table, index) in indexesToDrop)
             steps.Add(new MigrationStep(order++, MigrationStepKind.DropIndex, $"Index/Constraint {SqlIdentifier.QuotePart(index.Name)} auf {table.Ref} entfernen", IndexScriptGenerator.GenerateDrop(table.Ref, index)));
 
-        foreach (var (table, column) in computedColumnsToDrop)
+        // A computed column with no schema-bound relationship still must go after any index built on
+        // it - dropped last here, for exactly that reason.
+        foreach (var (table, column) in computedColumnsOutsideCombinedPhase)
             steps.Add(new MigrationStep(order++, MigrationStepKind.DropComputedColumn, $"Berechnete Spalte {SqlIdentifier.QuotePart(column.Name)} auf {table.Ref} entfernen", ComputedColumnScriptGenerator.GenerateDrop(table.Ref, column)));
 
         // Phase 2: the actual collation change.
@@ -230,7 +308,10 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 
         // Phase 3: recreate everything dropped in phase 1, in dependency-safe order, reapplying any
         // extended properties/permissions that were attached to an object that got fully recreated.
-        foreach (var (table, column) in computedColumnsToDrop)
+        //
+        // A computed column with no schema-bound relationship is recreated first here (mirroring where
+        // it was dropped last), so any index built on it already has the column to refer to.
+        foreach (var (table, column) in computedColumnsOutsideCombinedPhase)
         {
             steps.Add(new MigrationStep(order++, MigrationStepKind.AddComputedColumn, $"Berechnete Spalte {SqlIdentifier.QuotePart(column.Name)} auf {table.Ref} wiederherstellen", ComputedColumnScriptGenerator.GenerateCreate(table.Ref, column)));
 
@@ -264,30 +345,43 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 
         // Dropping and recreating a schema-bound view/function as a whole object loses any permissions
         // and extended properties scoped to it (or to its columns, or - for an indexed view - its
-        // indexes) - all must be replayed afterwards. Recreated in reverse of drop order, so an object
-        // that another dropped object references (e.g. the base view under an indexed wrapper view)
-        // exists again before its dependent is recreated.
-        foreach (var obj in Enumerable.Reverse(schemaBoundObjectsToDrop))
+        // indexes) - all must be replayed afterwards. Recreated in reverse of the drop order, so a node
+        // that another dropped node references (e.g. the base view under an indexed wrapper view, or a
+        // function a computed column calls) exists again before its dependent is recreated.
+        foreach (var node in combinedRecreateOrder)
         {
-            steps.Add(new MigrationStep(order++, MigrationStepKind.AddSchemaBoundObject, $"Schema-gebundenes Objekt {obj.Ref} wiederherstellen", RawDefinitionScriptGenerator.GenerateCreate(obj)));
-
-            foreach (var perm in snapshot.Permissions.Where(p => p.OnObject == obj.Ref))
-                steps.Add(new MigrationStep(order++, MigrationStepKind.GrantPermission, $"Berechtigung {perm.PermissionName} für {SqlIdentifier.QuotePart(perm.GranteePrincipal)} auf {obj.Ref} wiederherstellen", PermissionScriptGenerator.Generate(perm)));
-
-            foreach (var prop in snapshot.ExtendedProperties.Where(p => p.Object == obj.Ref))
-                steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {obj.Ref} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
-
-            foreach (var vi in viewIndexesByView.GetValueOrDefault(obj.Ref, []))
+            if (node.SchemaBoundObject is { } objRef)
             {
-                steps.Add(new MigrationStep(order++, MigrationStepKind.CreateIndex, $"Index {SqlIdentifier.QuotePart(vi.Index.Name)} auf indizierter View {obj.Ref} wiederherstellen", IndexScriptGenerator.GenerateCreate(obj.Ref, vi.Index)));
+                var obj = SchemaBoundObjectFor(objRef);
 
-                foreach (var prop in ExtendedPropsFor(obj.Ref, DatabaseObjectKind.Index, vi.Index.Name))
-                    steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {SqlIdentifier.QuotePart(vi.Index.Name)} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
+                steps.Add(new MigrationStep(order++, MigrationStepKind.AddSchemaBoundObject, $"Schema-gebundenes Objekt {obj.Ref} wiederherstellen", RawDefinitionScriptGenerator.GenerateCreate(obj)));
+
+                foreach (var perm in snapshot.Permissions.Where(p => p.OnObject == obj.Ref))
+                    steps.Add(new MigrationStep(order++, MigrationStepKind.GrantPermission, $"Berechtigung {perm.PermissionName} für {SqlIdentifier.QuotePart(perm.GranteePrincipal)} auf {obj.Ref} wiederherstellen", PermissionScriptGenerator.Generate(perm)));
+
+                foreach (var prop in snapshot.ExtendedProperties.Where(p => p.Object == obj.Ref))
+                    steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {obj.Ref} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
+
+                foreach (var vi in viewIndexesByView.GetValueOrDefault(obj.Ref, []))
+                {
+                    steps.Add(new MigrationStep(order++, MigrationStepKind.CreateIndex, $"Index {SqlIdentifier.QuotePart(vi.Index.Name)} auf indizierter View {obj.Ref} wiederherstellen", IndexScriptGenerator.GenerateCreate(obj.Ref, vi.Index)));
+
+                    foreach (var prop in ExtendedPropsFor(obj.Ref, DatabaseObjectKind.Index, vi.Index.Name))
+                        steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {SqlIdentifier.QuotePart(vi.Index.Name)} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
+                }
+            }
+            else if (node.ComputedColumn is { } key)
+            {
+                var (table, column) = computedColumnKeys[key];
+                steps.Add(new MigrationStep(order++, MigrationStepKind.AddComputedColumn, $"Berechnete Spalte {SqlIdentifier.QuotePart(column.Name)} auf {table.Ref} wiederherstellen", ComputedColumnScriptGenerator.GenerateCreate(table.Ref, column)));
+
+                foreach (var prop in snapshot.ExtendedProperties.Where(p => p.Object == table.Ref && p.ColumnName == column.Name))
+                    steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {table.Ref}.{SqlIdentifier.QuotePart(column.Name)} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
             }
         }
 
-        // Recreated last, after schema-bound objects: a check/default constraint's expression can call
-        // a schema-bound function, which must exist again before the constraint can be recreated.
+        // Recreated last, after the combined phase: a check/default constraint's expression can call a
+        // schema-bound function, which must exist again before the constraint can be recreated.
         foreach (var (table, def) in defaultsToDrop)
         {
             steps.Add(new MigrationStep(order++, MigrationStepKind.AddDefaultConstraint, $"Default-Constraint {SqlIdentifier.QuotePart(def.Name)} auf {table.Ref} wiederherstellen", DefaultConstraintScriptGenerator.GenerateCreate(table.Ref, def)));
@@ -324,5 +418,32 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 
         return changingColumns.Any(column =>
             Regex.IsMatch(definition, $@"\[{Regex.Escape(column)}\]|\b{Regex.Escape(column)}\b", RegexOptions.IgnoreCase));
+    }
+
+    /// <summary>
+    /// One node in the combined drop/recreate ordering graph: either a schema-bound view/function, or a
+    /// computed column identified by its table and column name. Exactly one of <see cref="SchemaBoundObject"/>
+    /// / <see cref="ComputedColumn"/> is non-null for any given instance.
+    /// </summary>
+    private readonly record struct GraphNode
+    {
+        private readonly ObjectRef? _computedColumnTable;
+        private readonly string? _computedColumnName;
+
+        private GraphNode(ObjectRef? schemaBoundObject, ObjectRef? computedColumnTable, string? computedColumnName)
+        {
+            SchemaBoundObject = schemaBoundObject;
+            _computedColumnTable = computedColumnTable;
+            _computedColumnName = computedColumnName;
+        }
+
+        public ObjectRef? SchemaBoundObject { get; }
+
+        public (ObjectRef Table, string ColumnName)? ComputedColumn =>
+            _computedColumnTable is { } table ? (table, _computedColumnName!) : null;
+
+        public static GraphNode ForSchemaBoundObject(ObjectRef objectRef) => new(objectRef, null, null);
+
+        public static GraphNode ForComputedColumn(ObjectRef table, string columnName) => new(null, table, columnName);
     }
 }
