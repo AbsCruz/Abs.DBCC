@@ -1,3 +1,5 @@
+using System.Data;
+using System.Runtime.CompilerServices;
 using Abs.DBCC.Application.Ports;
 using Microsoft.Data.SqlClient;
 
@@ -7,8 +9,13 @@ public sealed class SqlScriptRunner(SqlConnection connection) : ISqlScriptRunner
 {
     private SqlTransaction? _transaction;
 
-    public async Task BeginTransactionAsync(CancellationToken ct = default) =>
-        _transaction = (SqlTransaction)await connection.BeginTransactionAsync(ct);
+    public async Task BeginTransactionAsync(IsolationLevel isolationLevel = IsolationLevel.Unspecified, CancellationToken ct = default) =>
+        // SqlConnection.BeginTransactionAsync(IsolationLevel, ...) rejects IsolationLevel.Unspecified
+        // outright (it must be a concrete level) - the parameterless overload is the correct way to ask
+        // for the connection's normal default instead.
+        _transaction = (SqlTransaction)(isolationLevel == IsolationLevel.Unspecified
+            ? await connection.BeginTransactionAsync(ct)
+            : await connection.BeginTransactionAsync(isolationLevel, ct));
 
     public async Task CommitAsync(CancellationToken ct = default)
     {
@@ -48,6 +55,25 @@ public sealed class SqlScriptRunner(SqlConnection connection) : ISqlScriptRunner
         }
 
         return rows;
+    }
+
+    public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamQueryAsync(
+        string sql, IReadOnlyDictionary<string, object?>? parameters = null, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await using var command = CreateCommand(sql, parameters);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+
+        while (await reader.ReadAsync(ct))
+        {
+            var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                var value = reader.GetValue(i);
+                row[reader.GetName(i)] = value is DBNull ? null : value;
+            }
+
+            yield return row;
+        }
     }
 
     public async Task<int> ExecuteNonQueryAsync(
