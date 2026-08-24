@@ -52,8 +52,16 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
 
         Assert.True(report.Succeeded, report.FailureReason ?? "migration reported failure with no reason");
         Assert.NotNull(report.Verification);
-        Assert.Empty(report.Verification.StructuralDiffs);
         Assert.Empty(report.Verification.DataDiffs);
+
+        // The one expected exception: dbo.OrdersByCustomerCodeRenamed's own captured definition text
+        // legitimately differs after the migration. Recreating it corrected its header to embed its
+        // current (post-rename) name instead of the stale pre-rename one still baked into the original
+        // sys.sql_modules.definition (see RawDefinitionScriptGenerator) - a genuine, desirable text
+        // change, not a migration bug, so it is asserted for specifically rather than masked by a
+        // blanket-empty check.
+        var structuralDiff = Assert.Single(report.Verification.StructuralDiffs);
+        Assert.Contains("OrdersByCustomerCodeRenamed", structuralDiff.Details);
 
         await AssertColumnsHaveTargetCollationAsync(profile);
         await AssertDatabaseDefaultCollationAsync(profile);
@@ -70,6 +78,7 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
         await AssertPermissionsPreservedAsync(profile);
         await AssertIndexedViewStillWorksAsync(profile);
         await AssertDatabaseWideSweepObjectsStillWorkAsync(profile);
+        await AssertRenamedViewStillWorksUnderItsCurrentNameAsync(profile);
     }
 
     /// <summary>Returns false (without failing the test) if the SQL Server image lacks the Full-Text Search component.</summary>
@@ -286,5 +295,43 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
         violatingCommand.CommandText = "INSERT INTO dbo.RegistrationLog (Id, RegisteredAt) VALUES (4, '1999-01-01');";
         var ex = await Assert.ThrowsAsync<SqlException>(() => violatingCommand.ExecuteNonQueryAsync());
         Assert.Contains("CK_RegistrationLog_RegisteredAt", ex.Message);
+    }
+
+    /// <summary>
+    /// dbo.OrdersByCustomerCodeRenamed was created under a different name and renamed with sp_rename -
+    /// its stored sys.sql_modules.definition still embeds the pre-rename name. Proves
+    /// RawDefinitionScriptGenerator rewrote that header on recreate: the view (and its own index, which
+    /// can only have been created successfully against the *current* name) must both exist and work
+    /// under the renamed identity, with no trace of the old name anywhere.
+    /// </summary>
+    private static async Task AssertRenamedViewStillWorksUnderItsCurrentNameAsync(ConnectionProfile profile)
+    {
+        await using var connection = await OpenConnectionAsync(profile);
+
+        await using (var indexCommand = connection.CreateCommand())
+        {
+            indexCommand.CommandText = """
+                SELECT i.is_unique, i.type_desc
+                FROM sys.indexes i
+                JOIN sys.views v ON v.object_id = i.object_id
+                WHERE v.name = 'OrdersByCustomerCodeRenamed' AND i.name = 'IX_OrdersByCustomerCodeRenamed_Id';
+                """;
+            await using var reader = await indexCommand.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync(), "expected the renamed indexed view's own index to exist under the current name after the migration");
+            Assert.True(reader.GetBoolean(0));
+            Assert.Equal("CLUSTERED", reader.GetString(1));
+        }
+
+        await using (var dataCommand = connection.CreateCommand())
+        {
+            dataCommand.CommandText = "SELECT COUNT(*) FROM dbo.OrdersByCustomerCodeRenamed;";
+            var rowCount = (int)(await dataCommand.ExecuteScalarAsync())!;
+            Assert.True(rowCount > 0, "expected the renamed view to still return data after the migration");
+        }
+
+        await using var oldNameCommand = connection.CreateCommand();
+        oldNameCommand.CommandText = "SELECT COUNT(*) FROM sys.objects WHERE name = 'OrdersByCustomerCodeOriginal';";
+        var oldNameCount = (int)(await oldNameCommand.ExecuteScalarAsync())!;
+        Assert.Equal(0, oldNameCount);
     }
 }

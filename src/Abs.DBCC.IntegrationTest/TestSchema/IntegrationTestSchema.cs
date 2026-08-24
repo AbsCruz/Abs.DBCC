@@ -20,6 +20,10 @@ namespace Abs.DBCC.IntegrationTest.TestSchema;
 /// function AND is selected by the schema-bound RegistrationLogSummary view - a three-link chain
 /// (view -> computed column -> function) that exercises the combined drop/recreate ordering graph in
 /// both directions at once.
+///
+/// dbo.OrdersByCustomerCodeRenamed is created under one name and immediately renamed with sp_rename to
+/// prove RawDefinitionScriptGenerator correctly rewrites a recreated object's header when its stored
+/// sys.sql_modules.definition (never touched by sp_rename) still embeds the pre-rename name.
 /// </summary>
 public static class IntegrationTestSchema
 {
@@ -83,6 +87,19 @@ public static class IntegrationTestSchema
         -- three-link chain the combined drop/recreate ordering in MigrationPlanBuilder must get right.
         CREATE VIEW dbo.RegistrationLogSummary WITH SCHEMABINDING AS
             SELECT Id, RegisteredAt, IsValidFlag FROM dbo.RegistrationLog;
+        GO
+
+        -- Reproduces a real-world failure: sp_rename updates sys.objects.name but never touches
+        -- sys.sql_modules.definition, so this view's stored CREATE VIEW text still says
+        -- "OrdersByCustomerCodeOriginal" forever after. Replaying that text verbatim after a DROP would
+        -- silently recreate the view under the *old* name - its own index (scoped to the current,
+        -- renamed name) would then fail to create with "object not found".
+        CREATE VIEW dbo.OrdersByCustomerCodeOriginal WITH SCHEMABINDING AS
+            SELECT Id, CustomerCode FROM dbo.Orders;
+        GO
+        EXEC sp_rename 'dbo.OrdersByCustomerCodeOriginal', 'OrdersByCustomerCodeRenamed';
+        GO
+        CREATE UNIQUE CLUSTERED INDEX IX_OrdersByCustomerCodeRenamed_Id ON dbo.OrdersByCustomerCodeRenamed (Id);
         GO
 
         SET ANSI_NULLS ON;
