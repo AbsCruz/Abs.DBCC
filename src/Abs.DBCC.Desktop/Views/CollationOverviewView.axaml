@@ -41,8 +41,7 @@
                                             <TextBlock>
                                                 <Run Text="{Binding ColumnName}" />
                                                 <Run Text=" (" /><Run Text="{Binding SqlDataType}" /><Run Text=")" />
-                                                <Run Text=" – " />
-                                                <Run Text="{Binding Collation.Value}" />
+                                                <Run Text="{Binding Collation, StringFormat=' – {0}', TargetNullValue=''}" />
                                             </TextBlock>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
