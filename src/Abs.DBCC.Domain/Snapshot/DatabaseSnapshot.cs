@@ -9,6 +9,7 @@ public sealed record DatabaseSnapshot(
     IReadOnlyList<ObjectDefinition> ProgrammableObjects,
     IReadOnlyList<SchemaBoundDependency> SchemaBoundDependencies,
     IReadOnlyList<SchemaBoundObjectReference> SchemaBoundObjectReferences,
+    IReadOnlyList<ComputedColumnObjectReference> ComputedColumnObjectReferences,
     IReadOnlyList<SequenceSnapshot> Sequences,
     IReadOnlyList<SynonymSnapshot> Synonyms,
     IReadOnlyList<FullTextCatalogSnapshot> FullTextCatalogs,

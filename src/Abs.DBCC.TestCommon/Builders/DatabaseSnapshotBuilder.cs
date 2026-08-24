@@ -10,6 +10,7 @@ public sealed class DatabaseSnapshotBuilder
     private readonly List<ObjectDefinition> _programmableObjects = [];
     private readonly List<SchemaBoundDependency> _schemaBoundDependencies = [];
     private readonly List<SchemaBoundObjectReference> _schemaBoundObjectReferences = [];
+    private readonly List<ComputedColumnObjectReference> _computedColumnObjectReferences = [];
     private readonly List<SequenceSnapshot> _sequences = [];
     private readonly List<SynonymSnapshot> _synonyms = [];
     private readonly List<FullTextCatalogSnapshot> _fullTextCatalogs = [];
@@ -79,6 +80,12 @@ public sealed class DatabaseSnapshotBuilder
         return this;
     }
 
+    public DatabaseSnapshotBuilder WithComputedColumnObjectReference(ObjectRef table, string columnName, ObjectRef referencedObject)
+    {
+        _computedColumnObjectReferences.Add(new ComputedColumnObjectReference(table, columnName, referencedObject));
+        return this;
+    }
+
     public DatabaseSnapshotBuilder WithSequence(
         string schema, string name, string dataType = "bigint", string startValue = "1", string increment = "1")
     {
@@ -142,5 +149,5 @@ public sealed class DatabaseSnapshotBuilder
 
     public DatabaseSnapshot Build() => new(
         _databaseCollation, _tables, _foreignKeys, _programmableObjects, _schemaBoundDependencies, _schemaBoundObjectReferences,
-        _sequences, _synonyms, _fullTextCatalogs, _fullTextIndexes, _permissions, _extendedProperties, _viewIndexes);
+        _computedColumnObjectReferences, _sequences, _synonyms, _fullTextCatalogs, _fullTextIndexes, _permissions, _extendedProperties, _viewIndexes);
 }
