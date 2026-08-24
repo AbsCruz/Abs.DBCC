@@ -9,6 +9,17 @@ namespace Abs.DBCC.IntegrationTest.TestSchema;
 /// GRANT+DENY, and extended properties on a table/column/computed column/check constraint/index/the
 /// indexed view's own index. Batches are separated by a line containing only "GO", matching how SQL
 /// Server requires CREATE VIEW/PROCEDURE/FUNCTION/TRIGGER to be the first statement in their batch.
+///
+/// dbo.RegistrationLog and everything hanging off it exist purely to prove the database-default-collation
+/// sweep (MigrationPlanBuilder, updateDatabaseDefaultCollation branch): it has no character column at all,
+/// so it never appears in AffectedTables, yet its schema-bound view, default/check constraints, computed
+/// column and filtered index must still be dropped and recreated around the ALTER DATABASE ... COLLATE
+/// step, purely because that statement's dependency check is database-wide. Its default/check constraints
+/// each call the schema-bound dbo.GetMinRegistrationDate function (requiring them to be dropped before,
+/// and recreated after, schema-bound objects), and its IsValidFlag computed column both calls that same
+/// function AND is selected by the schema-bound RegistrationLogSummary view - a three-link chain
+/// (view -> computed column -> function) that exercises the combined drop/recreate ordering graph in
+/// both directions at once.
 /// </summary>
 public static class IntegrationTestSchema
 {
@@ -50,6 +61,28 @@ public static class IntegrationTestSchema
 
         CREATE VIEW dbo.CustomerSummary WITH SCHEMABINDING AS
             SELECT Id, Name, Email FROM dbo.Customers;
+        GO
+
+        CREATE FUNCTION dbo.GetMinRegistrationDate() RETURNS DATETIME WITH SCHEMABINDING AS
+        BEGIN
+            RETURN CONVERT(DATETIME, '2000-01-01');
+        END;
+        GO
+
+        CREATE TABLE dbo.RegistrationLog (
+            Id INT NOT NULL CONSTRAINT PK_RegistrationLog PRIMARY KEY,
+            RegisteredAt DATETIME NOT NULL CONSTRAINT DF_RegistrationLog_RegisteredAt DEFAULT (dbo.GetMinRegistrationDate()),
+            IsValidFlag AS (CASE WHEN dbo.GetMinRegistrationDate() IS NOT NULL THEN 1 ELSE 0 END),
+            CONSTRAINT CK_RegistrationLog_RegisteredAt CHECK (RegisteredAt >= dbo.GetMinRegistrationDate())
+        );
+        CREATE INDEX IX_RegistrationLog_Id_Filtered ON dbo.RegistrationLog (Id) WHERE Id > 0;
+        GO
+
+        -- IsValidFlag is both selected by this schema-bound view (view must drop before the column) and
+        -- itself calls dbo.GetMinRegistrationDate (the column must drop before the function) - the full
+        -- three-link chain the combined drop/recreate ordering in MigrationPlanBuilder must get right.
+        CREATE VIEW dbo.RegistrationLogSummary WITH SCHEMABINDING AS
+            SELECT Id, RegisteredAt, IsValidFlag FROM dbo.RegistrationLog;
         GO
 
         SET ANSI_NULLS ON;
@@ -150,5 +183,8 @@ public static class IntegrationTestSchema
         INSERT INTO dbo.Articles (Id, Title, Body) VALUES
             (1, N'Über uns', N'Willkommen bei unserem Café. Öffnungszeiten: Mo-Fr.'),
             (2, N'ÄÖÜ Special', N'Text mit Umlauten und ß, Groß- und Kleinschreibung.');
+
+        INSERT INTO dbo.RegistrationLog (Id, RegisteredAt) VALUES (1, '2001-01-01');
+        INSERT INTO dbo.RegistrationLog (Id) VALUES (2);
         """;
 }

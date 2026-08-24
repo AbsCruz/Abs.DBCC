@@ -69,6 +69,7 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
 
         await AssertPermissionsPreservedAsync(profile);
         await AssertIndexedViewStillWorksAsync(profile);
+        await AssertDatabaseWideSweepObjectsStillWorkAsync(profile);
     }
 
     /// <summary>Returns false (without failing the test) if the SQL Server image lacks the Full-Text Search component.</summary>
@@ -222,5 +223,68 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
         dataCommand.CommandText = "SELECT COUNT(*) FROM dbo.OrdersByCustomerCode;";
         var rowCount = (int)(await dataCommand.ExecuteScalarAsync())!;
         Assert.True(rowCount > 0, "expected the indexed view to still return data after the migration");
+    }
+
+    /// <summary>
+    /// dbo.RegistrationLog has no character column at all, so it is never part of AffectedTables - it
+    /// only proves the "updateDatabaseDefaultCollation sweeps the whole database" behavior: its
+    /// schema-bound view, its filtered index, its DEFAULT/CHECK constraints (each calling the
+    /// schema-bound dbo.GetMinRegistrationDate function) and its IsValidFlag computed column (which
+    /// both calls that function AND is selected by the schema-bound view - the three-link chain that
+    /// required the combined drop/recreate ordering graph) must all have survived the migration and
+    /// still work exactly as before.
+    /// </summary>
+    private static async Task AssertDatabaseWideSweepObjectsStillWorkAsync(ConnectionProfile profile)
+    {
+        await using var connection = await OpenConnectionAsync(profile);
+
+        await using (var indexCommand = connection.CreateCommand())
+        {
+            indexCommand.CommandText = """
+                SELECT COUNT(*) FROM sys.indexes i
+                JOIN sys.tables t ON t.object_id = i.object_id
+                WHERE t.name = 'RegistrationLog' AND i.name = 'IX_RegistrationLog_Id_Filtered';
+                """;
+            var indexCount = (int)(await indexCommand.ExecuteScalarAsync())!;
+            Assert.Equal(1, indexCount);
+        }
+
+        await using (var viewCommand = connection.CreateCommand())
+        {
+            viewCommand.CommandText = "SELECT COUNT(*) FROM dbo.RegistrationLogSummary;";
+            var viewRowCount = (int)(await viewCommand.ExecuteScalarAsync())!;
+            Assert.True(viewRowCount > 0, "expected the unrelated schema-bound view to still return data after the migration");
+        }
+
+        // The DEFAULT constraint must still call the (surviving) function to produce the right value.
+        await using (var insertCommand = connection.CreateCommand())
+        {
+            insertCommand.CommandText = "INSERT INTO dbo.RegistrationLog (Id) VALUES (3);";
+            await insertCommand.ExecuteNonQueryAsync();
+        }
+
+        await using (var selectCommand = connection.CreateCommand())
+        {
+            selectCommand.CommandText = "SELECT RegisteredAt, IsValidFlag FROM dbo.RegistrationLog WHERE Id = 3;";
+            await using var reader = await selectCommand.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal(new DateTime(2000, 1, 1), reader.GetDateTime(0));
+            Assert.Equal(1, reader.GetInt32(1));
+        }
+
+        // The computed column, selected by the schema-bound view above, must still call the (surviving)
+        // function too.
+        await using (var summaryCommand = connection.CreateCommand())
+        {
+            summaryCommand.CommandText = "SELECT IsValidFlag FROM dbo.RegistrationLogSummary WHERE Id = 3;";
+            var flag = (int)(await summaryCommand.ExecuteScalarAsync())!;
+            Assert.Equal(1, flag);
+        }
+
+        // The CHECK constraint must still call the (surviving) function to enforce the rule.
+        await using var violatingCommand = connection.CreateCommand();
+        violatingCommand.CommandText = "INSERT INTO dbo.RegistrationLog (Id, RegisteredAt) VALUES (4, '1999-01-01');";
+        var ex = await Assert.ThrowsAsync<SqlException>(() => violatingCommand.ExecuteNonQueryAsync());
+        Assert.Contains("CK_RegistrationLog_RegisteredAt", ex.Message);
     }
 }
