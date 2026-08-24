@@ -13,6 +13,9 @@ public static class Strings
 
     private static string L(string de, string en) => IsGerman ? de : en;
 
+    // MainWindow
+    public static string ConnectedToFormat => L("Verbunden mit: {0} ({1})", "Connected to: {0} ({1})");
+
     // ConnectionSetupView
     public static string ConnectToDatabaseTitle => L("Verbindung zur Datenbank", "Connect to Database");
     public static string ServerLabel => L("Server", "Server");

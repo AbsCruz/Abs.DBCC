@@ -1,4 +1,5 @@
 using Abs.DBCC.Application.Connections;
+using Abs.DBCC.Desktop.Localization;
 using Abs.DBCC.Domain.Migration;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -14,6 +15,20 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     public partial ViewModelBase CurrentViewModel { get; set; }
+
+    /// <summary>
+    /// The connection currently in use, shown as a banner on every screen once set. Null while the
+    /// user is still on the connection setup screen (nothing confirmed yet); it is deliberately left
+    /// untouched when navigating to the migration result screen, so the banner still shows what the
+    /// just-completed migration ran against.
+    /// </summary>
+    [ObservableProperty]
+    public partial ConnectionProfile? CurrentProfile { get; set; }
+
+    public string? ConnectionDisplay =>
+        CurrentProfile is null ? null : string.Format(Strings.ConnectedToFormat, CurrentProfile.Database, CurrentProfile.Server);
+
+    partial void OnCurrentProfileChanged(ConnectionProfile? value) => OnPropertyChanged(nameof(ConnectionDisplay));
 
     public MainViewModel(
         Func<ConnectionSetupViewModel> connectionSetupFactory,
@@ -33,6 +48,7 @@ public partial class MainViewModel : ViewModelBase
 
     private ConnectionSetupViewModel CreateConnectionSetup()
     {
+        CurrentProfile = null;
         var vm = _connectionSetupFactory();
         vm.ConnectionConfirmed += (_, profile) => CurrentViewModel = CreateCollationOverview(profile);
         return vm;
@@ -40,6 +56,7 @@ public partial class MainViewModel : ViewModelBase
 
     private CollationOverviewViewModel CreateCollationOverview(ConnectionProfile profile)
     {
+        CurrentProfile = profile;
         var vm = _collationOverviewFactory(profile);
         vm.BackRequested += (_, _) => CurrentViewModel = CreateConnectionSetup();
         vm.ContinueRequested += (_, _) => CurrentViewModel = CreateTargetCollationPicker(profile);
@@ -48,6 +65,7 @@ public partial class MainViewModel : ViewModelBase
 
     private TargetCollationPickerViewModel CreateTargetCollationPicker(ConnectionProfile profile)
     {
+        CurrentProfile = profile;
         var vm = _targetCollationPickerFactory(profile);
         vm.BackRequested += (_, _) => CurrentViewModel = CreateCollationOverview(profile);
         vm.PlanBuilt += (_, args) => CurrentViewModel = CreatePlanReview(args.Profile, args.Plan);
@@ -56,6 +74,7 @@ public partial class MainViewModel : ViewModelBase
 
     private MigrationPlanReviewViewModel CreatePlanReview(ConnectionProfile profile, MigrationPlan plan)
     {
+        CurrentProfile = profile;
         var vm = _planReviewFactory(profile, plan);
         vm.BackRequested += (_, _) => CurrentViewModel = CreateTargetCollationPicker(profile);
         vm.StartRequested += (_, args) => CurrentViewModel = CreateMigrationRun(args.Profile, args.Plan);
@@ -64,6 +83,7 @@ public partial class MainViewModel : ViewModelBase
 
     private MigrationRunViewModel CreateMigrationRun(ConnectionProfile profile, MigrationPlan plan)
     {
+        CurrentProfile = profile;
         var vm = _migrationRunFactory(profile, plan);
         vm.Completed += (_, report) => CurrentViewModel = CreateMigrationResult(report);
         vm.CancelledAcknowledged += (_, _) => CurrentViewModel = CreateConnectionSetup();
