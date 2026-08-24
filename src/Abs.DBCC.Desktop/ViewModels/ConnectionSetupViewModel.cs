@@ -27,37 +27,32 @@ public partial class ConnectionSetupViewModel(ISender sender) : ViewModelBase
     public partial string? StatusMessage { get; set; }
 
     [ObservableProperty]
-    public partial bool IsTesting { get; set; }
-
-    [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(ContinueCommand))]
-    public partial bool IsConnectionVerified { get; set; }
+    public partial bool IsConnecting { get; set; }
 
     public event EventHandler<ConnectionProfile>? ConnectionConfirmed;
 
     private ConnectionProfile BuildProfile() => new(Server, Database, User, Password, TrustServerCertificate);
 
+    /// <summary>Tests the connection and only proceeds once it actually succeeds.</summary>
     [RelayCommand]
-    private async Task TestConnectionAsync()
+    private async Task ContinueAsync()
     {
-        IsTesting = true;
-        IsConnectionVerified = false;
+        IsConnecting = true;
         StatusMessage = null;
 
         try
         {
-            var result = await sender.Send(new TestConnectionQuery(BuildProfile()));
-            IsConnectionVerified = result.IsSuccess;
-            StatusMessage = result.IsSuccess
-                ? Strings.ConnectionSucceeded
-                : string.Format(Strings.ConnectionFailedFormat, result.Error);
+            var profile = BuildProfile();
+            var result = await sender.Send(new TestConnectionQuery(profile));
+
+            if (result.IsSuccess)
+                ConnectionConfirmed?.Invoke(this, profile);
+            else
+                StatusMessage = string.Format(Strings.ConnectionFailedFormat, result.Error);
         }
         finally
         {
-            IsTesting = false;
+            IsConnecting = false;
         }
     }
-
-    [RelayCommand(CanExecute = nameof(IsConnectionVerified))]
-    private void Continue() => ConnectionConfirmed?.Invoke(this, BuildProfile());
 }

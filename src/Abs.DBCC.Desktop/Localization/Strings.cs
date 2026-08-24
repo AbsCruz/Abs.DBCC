@@ -24,9 +24,7 @@ public static class Strings
     public static string UserLabel => L("Benutzer", "User");
     public static string PasswordLabel => L("Passwort", "Password");
     public static string TrustServerCertificateLabel => L("Serverzertifikat vertrauen (TrustServerCertificate)", "Trust server certificate (TrustServerCertificate)");
-    public static string TestConnectionButton => L("Verbindung testen", "Test Connection");
     public static string ContinueButton => L("Weiter", "Continue");
-    public static string ConnectionSucceeded => L("Verbindung erfolgreich.", "Connection succeeded.");
     public static string ConnectionFailedFormat => L("Verbindung fehlgeschlagen: {0}", "Connection failed: {0}");
 
     // CollationOverviewView

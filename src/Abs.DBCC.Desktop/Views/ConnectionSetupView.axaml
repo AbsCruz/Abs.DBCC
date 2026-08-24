@@ -35,14 +35,11 @@
         <CheckBox Content="{x:Static res:Strings.TrustServerCertificateLabel}"
                   IsChecked="{Binding TrustServerCertificate}" />
 
-        <Button Content="{x:Static res:Strings.TestConnectionButton}"
-                Command="{Binding TestConnectionCommand}"
-                IsEnabled="{Binding !IsTesting}" />
-
-        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="Red" />
 
         <Button Content="{x:Static res:Strings.ContinueButton}"
                 Command="{Binding ContinueCommand}"
+                IsEnabled="{Binding !IsConnecting}"
                 HorizontalAlignment="Right" />
 
     </StackPanel>
