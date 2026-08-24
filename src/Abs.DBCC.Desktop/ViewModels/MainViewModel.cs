@@ -88,6 +88,7 @@ public partial class MainViewModel : ViewModelBase
         vm.Completed += (_, report) => CurrentViewModel = CreateMigrationResult(report);
         vm.CancelledAcknowledged += (_, _) => CurrentViewModel = CreateConnectionSetup();
         vm.UnexpectedErrorAcknowledged += (_, _) => CurrentViewModel = CreateConnectionSetup();
+        vm.Start();
         return vm;
     }
 

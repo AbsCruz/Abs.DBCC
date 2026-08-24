@@ -18,11 +18,13 @@ public class MigrationRunViewModelTests
 
     // ExecuteMigrationCommand's ISender.Send call is awaited as the very first statement in RunAsync;
     // Moq's ReturnsAsync/ThrowsAsync produce an already-completed task, so that await never yields, and
-    // the fire-and-forget "_ = RunAsync()" from the constructor runs to completion synchronously before
-    // the constructor call returns - no polling/waiting needed in these tests.
+    // Start()'s fire-and-forget "_ = RunAsync()" runs to completion synchronously before Start() itself
+    // returns. That is exactly why Start() must never run from the constructor (see its doc comment) -
+    // these tests assert on the Completed/*Acknowledged events specifically to prove callers really can
+    // subscribe first and still observe them, rather than only checking terminal VM state.
 
     [Fact]
-    public void Constructor_MigrationSucceeds_RaisesCompletedAndStopsRunning()
+    public void Start_MigrationSucceeds_RaisesCompletedAndStopsRunning()
     {
         var report = new MigrationReport(true, [], null, null);
         var sender = new Mock<ISender>();
@@ -31,22 +33,23 @@ public class MigrationRunViewModelTests
 
         var vm = new MigrationRunViewModel(sender.Object, Profile, Plan());
         vm.Completed += (_, r) => raised = r;
+        vm.Start();
 
-        // The fire-and-forget task already ran during construction (see comment above), so re-attaching
-        // Completed after construction would miss it; assert on the terminal VM state directly instead.
+        Assert.Same(report, raised);
         Assert.False(vm.IsRunning);
         Assert.False(vm.WasCancelled);
         Assert.False(vm.HasUnexpectedError);
     }
 
     [Fact]
-    public void Constructor_OperationCanceled_SetsWasCancelledAndStopsRunning()
+    public void Start_OperationCanceled_SetsWasCancelledAndStopsRunning()
     {
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<ExecuteMigrationCommand>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
         var vm = new MigrationRunViewModel(sender.Object, Profile, Plan());
+        vm.Start();
 
         Assert.False(vm.IsRunning);
         Assert.True(vm.WasCancelled);
@@ -54,7 +57,7 @@ public class MigrationRunViewModelTests
     }
 
     [Fact]
-    public void Constructor_ConnectionLostBeforeReportProduced_SetsUnexpectedErrorInsteadOfHanging()
+    public void Start_ConnectionLostBeforeReportProduced_SetsUnexpectedErrorInsteadOfHanging()
     {
         // Simulates a lost database connection surfacing as a SqlException that escapes
         // ExecuteMigrationCommand entirely (e.g. the very first connection attempt fails), i.e. before
@@ -64,6 +67,7 @@ public class MigrationRunViewModelTests
             .ThrowsAsync(new InvalidOperationException("A network-related or instance-specific error occurred."));
 
         var vm = new MigrationRunViewModel(sender.Object, Profile, Plan());
+        vm.Start();
 
         Assert.False(vm.IsRunning);
         Assert.False(vm.WasCancelled);
@@ -80,9 +84,28 @@ public class MigrationRunViewModelTests
         var vm = new MigrationRunViewModel(sender.Object, Profile, Plan());
         var raised = false;
         vm.UnexpectedErrorAcknowledged += (_, _) => raised = true;
+        vm.Start();
 
         vm.AcknowledgeUnexpectedErrorCommand.Execute(null);
 
         Assert.True(raised);
+    }
+
+    [Fact]
+    public void Constructor_DoesNotStartTheMigration()
+    {
+        // Reproduces a real bug: MainViewModel wires up Completed/CancelledAcknowledged/
+        // UnexpectedErrorAcknowledged only after the view model is constructed. If the constructor
+        // itself kicked off the work (and that work happened to complete synchronously - as it does
+        // with Moq's ReturnsAsync/ThrowsAsync, and potentially in production for a fast enough
+        // operation), the event would already have fired before anyone could subscribe to it.
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<ExecuteMigrationCommand>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MigrationReport(true, [], null, null));
+
+        var vm = new MigrationRunViewModel(sender.Object, Profile, Plan());
+
+        Assert.True(vm.IsRunning);
+        sender.Verify(s => s.Send(It.IsAny<ExecuteMigrationCommand>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

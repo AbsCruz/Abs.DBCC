@@ -47,9 +47,17 @@ public partial class MigrationRunViewModel : ViewModelBase
         _profile = profile;
         _plan = plan;
         TotalStepCount = plan.Steps.Count;
-
-        _ = RunAsync();
     }
+
+    /// <summary>
+    /// Kicks off the migration. Deliberately not called from the constructor: if the underlying work
+    /// happened to complete synchronously (e.g. an immediate validation failure, or a fake/completed
+    /// task in a test), firing <see cref="Completed"/> from within the constructor would race the
+    /// caller's own subscription to it, wired up only after the constructor returns - see MainViewModel
+    /// (Completed/CancelledAcknowledged/UnexpectedErrorAcknowledged are all subscribed there). Callers
+    /// must wire up their event handlers first, then invoke this.
+    /// </summary>
+    public void Start() => _ = RunAsync();
 
     private bool CanCancel => IsRunning && !IsCancelling;
 
