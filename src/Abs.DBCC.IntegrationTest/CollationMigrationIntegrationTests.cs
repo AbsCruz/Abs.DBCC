@@ -54,14 +54,13 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
         Assert.NotNull(report.Verification);
         Assert.Empty(report.Verification.DataDiffs);
 
-        // The one expected exception: dbo.OrdersByCustomerCodeRenamed's own captured definition text
-        // legitimately differs after the migration. Recreating it corrected its header to embed its
-        // current (post-rename) name instead of the stale pre-rename one still baked into the original
-        // sys.sql_modules.definition (see RawDefinitionScriptGenerator) - a genuine, desirable text
-        // change, not a migration bug, so it is asserted for specifically rather than masked by a
-        // blanket-empty check.
-        var structuralDiff = Assert.Single(report.Verification.StructuralDiffs);
-        Assert.Contains("OrdersByCustomerCodeRenamed", structuralDiff.Details);
+        // Both dbo.OrdersByCustomerCodeRenamed (recreated under its post-sp_rename name, whose stored
+        // sys.sql_modules.definition still embedded the pre-rename one) and dbo.OrdersByCustomerCode
+        // (last deployed via ALTER, not CREATE) come back with a rewritten header - RawDefinitionScriptGenerator's
+        // deliberate, harmless normalization to the object's current identity. DatabaseSnapshotComparer
+        // replays each object's captured "before" text the same way the migration itself does before
+        // comparing, so neither rewrite is mistaken for a real structural change.
+        Assert.Empty(report.Verification.StructuralDiffs);
 
         await AssertColumnsHaveTargetCollationAsync(profile);
         await AssertDatabaseDefaultCollationAsync(profile);
@@ -209,7 +208,13 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
         Assert.Contains(permissions, p => p.Name == "DELETE" && p.State == "DENY");
     }
 
-    /// <summary>Proves the indexed view (a schema-bound view with its own unique clustered index) survived structurally intact and functional.</summary>
+    /// <summary>
+    /// Proves the indexed view (a schema-bound view with its own unique clustered index plus an
+    /// additional nonclustered index) survived structurally intact and functional. Its very existence
+    /// after the migration already proves the clustered/nonclustered recreate ordering worked - had the
+    /// nonclustered index been created before its clustered sibling, SQL Server would have rejected it
+    /// outright and the migration would have failed rather than reaching this assertion.
+    /// </summary>
     private static async Task AssertIndexedViewStillWorksAsync(ConnectionProfile profile)
     {
         await using var connection = await OpenConnectionAsync(profile);
@@ -217,15 +222,23 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
         await using (var indexCommand = connection.CreateCommand())
         {
             indexCommand.CommandText = """
-                SELECT i.is_unique, i.type_desc
+                SELECT i.name, i.is_unique, i.type_desc
                 FROM sys.indexes i
                 JOIN sys.views v ON v.object_id = i.object_id
-                WHERE v.name = 'OrdersByCustomerCode' AND i.name = 'IX_OrdersByCustomerCode_Id';
+                WHERE v.name = 'OrdersByCustomerCode' AND i.name IN ('IX_OrdersByCustomerCode_Id', 'IX_OrdersByCustomerCode_CustomerCode');
                 """;
             await using var reader = await indexCommand.ExecuteReaderAsync();
-            Assert.True(await reader.ReadAsync(), "expected the indexed view's unique clustered index to still exist after the migration");
-            Assert.True(reader.GetBoolean(0));
-            Assert.Equal("CLUSTERED", reader.GetString(1));
+            var indexes = new Dictionary<string, (bool IsUnique, string TypeDesc)>();
+            while (await reader.ReadAsync())
+                indexes[reader.GetString(0)] = (reader.GetBoolean(1), reader.GetString(2));
+
+            Assert.True(indexes.TryGetValue("IX_OrdersByCustomerCode_Id", out var clustered), "expected the indexed view's unique clustered index to still exist after the migration");
+            Assert.True(clustered.IsUnique);
+            Assert.Equal("CLUSTERED", clustered.TypeDesc);
+
+            Assert.True(indexes.TryGetValue("IX_OrdersByCustomerCode_CustomerCode", out var nonclustered), "expected the indexed view's additional nonclustered index to still exist after the migration");
+            Assert.False(nonclustered.IsUnique);
+            Assert.Equal("NONCLUSTERED", nonclustered.TypeDesc);
         }
 
         await using var dataCommand = connection.CreateCommand();

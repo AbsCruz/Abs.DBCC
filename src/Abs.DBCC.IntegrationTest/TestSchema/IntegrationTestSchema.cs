@@ -4,11 +4,12 @@ namespace Abs.DBCC.IntegrationTest.TestSchema;
 /// One interconnected schema covering every object type this tool understands: tables with
 /// PK/unique/check/default constraints and a persisted computed column, a filtered index, two foreign
 /// keys (one touching an altered column, one not), a schema-bound view, an *indexed* schema-bound view
-/// (with its own unique clustered index), a plain view, a trigger, a stored procedure, a scalar and a
-/// table-valued function, a sequence, a synonym, a full-text catalog and index, table/column/schema-level
-/// GRANT+DENY, and extended properties on a table/column/computed column/check constraint/index/the
-/// indexed view's own index. Batches are separated by a line containing only "GO", matching how SQL
-/// Server requires CREATE VIEW/PROCEDURE/FUNCTION/TRIGGER to be the first statement in their batch.
+/// (with its own unique clustered index plus an additional nonclustered index), a plain view, a trigger,
+/// a stored procedure, a scalar and a table-valued function, a sequence, a synonym, a full-text catalog
+/// and index, table/column/schema-level GRANT+DENY, and extended properties on a
+/// table/column/computed column/check constraint/index/the indexed view's own index. Batches are
+/// separated by a line containing only "GO", matching how SQL Server requires CREATE
+/// VIEW/PROCEDURE/FUNCTION/TRIGGER to be the first statement in their batch.
 ///
 /// dbo.RegistrationLog and everything hanging off it exist purely to prove the database-default-collation
 /// sweep (MigrationPlanBuilder, updateDatabaseDefaultCollation branch): it has no character column at all,
@@ -24,6 +25,13 @@ namespace Abs.DBCC.IntegrationTest.TestSchema;
 /// dbo.OrdersByCustomerCodeRenamed is created under one name and immediately renamed with sp_rename to
 /// prove RawDefinitionScriptGenerator correctly rewrites a recreated object's header when its stored
 /// sys.sql_modules.definition (never touched by sp_rename) still embeds the pre-rename name.
+///
+/// dbo.OrdersByCustomerCode's last deployment statement is ALTER, not CREATE, and it carries a
+/// nonclustered index (IX_OrdersByCustomerCode_CustomerCode) alongside its materializing unique
+/// clustered index (IX_OrdersByCustomerCode_Id): the former proves DatabaseSnapshotComparer no longer
+/// flags the expected ALTER-to-CREATE header rewrite as a false-positive structural diff, and the
+/// latter proves the nonclustered index is recreated only after its clustered sibling (SQL Server
+/// rejects creating it otherwise) and dropped before it.
 /// </summary>
 public static class IntegrationTestSchema
 {
@@ -108,7 +116,21 @@ public static class IntegrationTestSchema
         CREATE VIEW dbo.OrdersByCustomerCode WITH SCHEMABINDING AS
             SELECT Id, CustomerCode FROM dbo.Orders;
         GO
+
+        -- Its last deployment used ALTER (not CREATE) - sys.sql_modules.definition stores whatever
+        -- statement was last run verbatim, so replaying it after a DROP must rewrite this header to
+        -- CREATE (see RawDefinitionScriptGenerator), which legitimately changes its text without the
+        -- view itself having actually changed. Proves DatabaseSnapshotComparer no longer mistakes that
+        -- expected rewrite for a real structural difference.
+        ALTER VIEW dbo.OrdersByCustomerCode WITH SCHEMABINDING AS
+            SELECT Id, CustomerCode FROM dbo.Orders;
+        GO
         CREATE UNIQUE CLUSTERED INDEX IX_OrdersByCustomerCode_Id ON dbo.OrdersByCustomerCode (Id);
+        -- A nonclustered index alongside the materializing unique clustered index above - it can only be
+        -- created once that clustered index already exists, and must be dropped before it on the way
+        -- back down, proving MigrationPlanBuilder orders a view's own indexes accordingly rather than
+        -- however the snapshot happens to list them.
+        CREATE INDEX IX_OrdersByCustomerCode_CustomerCode ON dbo.OrdersByCustomerCode (CustomerCode);
         GO
 
         CREATE VIEW dbo.OrdersPlain AS
