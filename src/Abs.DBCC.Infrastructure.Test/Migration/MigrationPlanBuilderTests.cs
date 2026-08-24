@@ -97,8 +97,12 @@ public class MigrationPlanBuilderTests
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropDefaultConstraint && s.Sql.Contains("DF_Orders_CustomerName"));
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropComputedColumn && s.Sql.Contains("DisplayName"));
 
-        // The unrelated check constraint and the PK (on a column that isn't changing) must survive untouched.
-        Assert.DoesNotContain(steps, s => s.Sql.Contains("CK_Orders_Unrelated"));
+        // updateDatabaseDefaultCollation is true here, so even a check constraint unrelated to any
+        // changing column must be dropped and recreated too - see
+        // Build_UpdateDatabaseDefaultCollation_SweepsEveryCheckConstraintComputedColumnAndFilteredIndex
+        // for the dedicated test. The PK (a non-filtered index on a column that isn't changing) is
+        // untouched regardless, since plain indexes never depend on collation.
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropCheckConstraint && s.Sql.Contains("CK_Orders_Unrelated"));
         Assert.DoesNotContain(steps, s => s.Kind == MigrationStepKind.DropIndex && s.Sql.Contains("PK_Orders"));
 
         // Exactly one alter-column step, for CustomerName only.
@@ -123,6 +127,126 @@ public class MigrationPlanBuilderTests
         Assert.True(IndexOfFirst(s => s.Kind == MigrationStepKind.AlterColumnCollation) < IndexOfFirst(s => s.Kind == MigrationStepKind.AlterDatabaseCollation));
         Assert.True(IndexOfFirst(s => s.Kind == MigrationStepKind.AlterDatabaseCollation) < IndexOfFirst(s => s.Kind == MigrationStepKind.AddComputedColumn));
         Assert.True(IndexOfFirst(s => s.Kind == MigrationStepKind.CreateIndex) < IndexOfFirst(s => s.Kind == MigrationStepKind.AddForeignKey));
+    }
+
+    [Fact]
+    public void Build_UpdateDatabaseDefaultCollation_SweepsEveryCheckConstraintComputedColumnAndFilteredIndex()
+    {
+        // Reproduces a real-world failure: ALTER DATABASE ... COLLATE checks dependencies across the
+        // WHOLE database, not just the columns being altered - a check constraint, computed column,
+        // filtered index or schema-bound view on a table that has nothing to do with the migrating
+        // column can still block it (SQL Server reports these by name, e.g. "Object 'X' depends on
+        // database collation"). There is no catalog view that predicts this in advance, so when this
+        // flag is set, every one of these across the database must be dropped and recreated regardless
+        // of which column(s) they touch.
+        var orders = new TableSnapshotBuilder("dbo", "Orders")
+            .WithColumn("Name", "varchar", Source.Value)
+            .Build();
+
+        var unrelated = new TableSnapshotBuilder("dbo", "Unrelated")
+            .WithColumn("Id", "int", null, isNullable: false)
+            .WithColumn("Status", "varchar", Target.Value, maxLength: 20)
+            .WithComputedColumn("StatusLabel", "[Status]+'!'")
+            .WithIndex("Idx_Unrelated_Id_Where_IdIsNotNull", ["Id"], filter: "([Id] IS NOT NULL)")
+            .WithIndex("IX_Unrelated_Plain", ["Id"])
+            .WithCheckConstraint("Ck_Unrelated_Status", "Status", "([Status]<>'')")
+            .Build();
+
+        var unrelatedViewRef = new ObjectRef("dbo", "vUnrelated", DatabaseObjectKind.View);
+        var snapshot = new DatabaseSnapshotBuilder()
+            .WithTable(orders)
+            .WithTable(unrelated)
+            .WithView("dbo", "vUnrelated", "CREATE VIEW [dbo].[vUnrelated] WITH SCHEMABINDING AS SELECT Id FROM dbo.Unrelated;", isSchemaBound: true)
+            .Build();
+
+        var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: true);
+        var steps = plan.Steps;
+
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropCheckConstraint && s.Sql.Contains("Ck_Unrelated_Status"));
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropComputedColumn && s.Sql.Contains("StatusLabel"));
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropIndex && s.Sql.Contains("Idx_Unrelated_Id_Where_IdIsNotNull"));
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("vUnrelated"));
+
+        // A plain (non-filtered) index never depends on collation and must be left alone.
+        Assert.DoesNotContain(steps, s => s.Sql.Contains("IX_Unrelated_Plain"));
+
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.AddCheckConstraint && s.Sql.Contains("Ck_Unrelated_Status"));
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.AddComputedColumn && s.Sql.Contains("StatusLabel"));
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.CreateIndex && s.Sql.Contains("Idx_Unrelated_Id_Where_IdIsNotNull"));
+        Assert.Contains(steps, s => s.Kind == MigrationStepKind.AddSchemaBoundObject && s.Sql.Contains("vUnrelated"));
+    }
+
+    [Fact]
+    public void Build_UpdateDatabaseDefaultCollationFalse_LeavesUnrelatedObjectsCompletelyUntouched()
+    {
+        var orders = new TableSnapshotBuilder("dbo", "Orders")
+            .WithColumn("Name", "varchar", Source.Value)
+            .Build();
+
+        var unrelated = new TableSnapshotBuilder("dbo", "Unrelated")
+            .WithColumn("Id", "int", null, isNullable: false)
+            .WithColumn("Status", "varchar", Target.Value, maxLength: 20)
+            .WithComputedColumn("StatusLabel", "[Status]+'!'")
+            .WithIndex("Idx_Unrelated_Id_Where_IdIsNotNull", ["Id"], filter: "([Id] IS NOT NULL)")
+            .WithCheckConstraint("Ck_Unrelated_Status", "Status", "([Status]<>'')")
+            .Build();
+
+        var snapshot = new DatabaseSnapshotBuilder()
+            .WithTable(orders)
+            .WithTable(unrelated)
+            .WithView("dbo", "vUnrelated", "CREATE VIEW [dbo].[vUnrelated] WITH SCHEMABINDING AS SELECT Id FROM dbo.Unrelated;", isSchemaBound: true)
+            .Build();
+
+        var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: false);
+        var steps = plan.Steps;
+
+        Assert.DoesNotContain(steps, s => s.Sql.Contains("Ck_Unrelated_Status"));
+        Assert.DoesNotContain(steps, s => s.Sql.Contains("StatusLabel"));
+        Assert.DoesNotContain(steps, s => s.Sql.Contains("Idx_Unrelated_Id_Where_IdIsNotNull"));
+        Assert.DoesNotContain(steps, s => s.Sql.Contains("vUnrelated"));
+    }
+
+    [Fact]
+    public void Build_UpdateDatabaseDefaultCollation_DropsDefaultAndCheckConstraintsBeforeTheFunctionTheyCall()
+    {
+        // Reproduces a real-world failure: a DEFAULT constraint's expression calls a schema-bound
+        // function (e.g. "DEFAULT dbo.GetDefaultProcessingDate()"). SQL Server refuses to DROP FUNCTION while that
+        // constraint still references it - just like the view-on-view case, but for a constraint
+        // referencing a function - so the constraint must be dropped first (and only recreated once the
+        // function exists again), even though it is never itself a target a schema-bound object depends
+        // on, unlike a computed column.
+        var orders = new TableSnapshotBuilder("dbo", "Orders")
+            .WithColumn("Name", "varchar", Source.Value)
+            .Build();
+
+        var adjustments = new TableSnapshotBuilder("dbo", "AdjustmentRecord")
+            .WithColumn("Id", "int", null, isNullable: false)
+            .WithColumn("ProcessedAt", "datetime", null)
+            .WithDefaultConstraint("Df_AdjustmentRecord_ProcessedAt", "ProcessedAt", "(dbo.GetDefaultProcessingDate())")
+            .WithCheckConstraint("Ck_AdjustmentRecord_ProcessedAt", "ProcessedAt", "(dbo.GetDefaultProcessingDate() IS NOT NULL)")
+            .Build();
+
+        var snapshot = new DatabaseSnapshotBuilder()
+            .WithTable(orders)
+            .WithTable(adjustments)
+            .WithFunction("dbo", "GetDefaultProcessingDate", "CREATE FUNCTION [dbo].[GetDefaultProcessingDate]() WITH SCHEMABINDING RETURNS datetime AS BEGIN RETURN GETDATE(); END;", isSchemaBound: true)
+            .Build();
+
+        var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: true);
+        var steps = plan.Steps.ToList();
+
+        var dropDefault = steps.FindIndex(s => s.Kind == MigrationStepKind.DropDefaultConstraint && s.Sql.Contains("Df_AdjustmentRecord_ProcessedAt"));
+        var dropCheck = steps.FindIndex(s => s.Kind == MigrationStepKind.DropCheckConstraint && s.Sql.Contains("Ck_AdjustmentRecord_ProcessedAt"));
+        var dropFunction = steps.FindIndex(s => s.Kind == MigrationStepKind.DropSchemaBoundObject && s.Sql.Contains("GetDefaultProcessingDate"));
+        var addFunction = steps.FindIndex(s => s.Kind == MigrationStepKind.AddSchemaBoundObject && s.Sql.Contains("GetDefaultProcessingDate"));
+        var addDefault = steps.FindIndex(s => s.Kind == MigrationStepKind.AddDefaultConstraint && s.Sql.Contains("Df_AdjustmentRecord_ProcessedAt"));
+        var addCheck = steps.FindIndex(s => s.Kind == MigrationStepKind.AddCheckConstraint && s.Sql.Contains("Ck_AdjustmentRecord_ProcessedAt"));
+
+        Assert.True(dropDefault >= 0 && dropCheck >= 0 && dropFunction >= 0 && addFunction >= 0 && addDefault >= 0 && addCheck >= 0);
+        Assert.True(dropDefault < dropFunction, "the default constraint must be dropped before the function it calls");
+        Assert.True(dropCheck < dropFunction, "the check constraint must be dropped before the function it calls");
+        Assert.True(addFunction < addDefault, "the function must be recreated before the default constraint that calls it");
+        Assert.True(addFunction < addCheck, "the function must be recreated before the check constraint that calls it");
     }
 
     [Fact]

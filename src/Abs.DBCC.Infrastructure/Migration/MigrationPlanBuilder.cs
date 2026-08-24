@@ -12,15 +12,15 @@ namespace Abs.DBCC.Infrastructure.Migration;
 /// Pure planning logic (no I/O): decides which objects must be dropped, which columns altered, and
 /// which objects recreated, then emits the steps as one fixed sequence of phases:
 ///
-///   drop indexed-view's indexes -> drop schema-bound view/function -> drop full-text index -> drop FK
-///   -> drop index/PK/UQ [+ its extended properties captured for reapply] -> drop check -> drop default
-///   -> drop computed column
+///   drop check -> drop default -> drop indexed-view's indexes -> drop schema-bound view/function ->
+///   drop full-text index -> drop FK -> drop index/PK/UQ [+ its extended properties captured for
+///   reapply] -> drop computed column
 ///   -> alter column collation
 ///   -> (optional) alter database default collation
-///   -> add computed column [+ its extended properties] -> add default [+ its extended properties]
-///   -> add check [+ its extended properties] -> add index/PK/UQ [+ its extended properties] -> add FK
-///   [+ its extended properties] -> add full-text index -> add schema-bound view/function [+ its
-///   permissions/extended properties] -> add indexed-view's indexes [+ their extended properties]
+///   -> add computed column [+ its extended properties] -> add index/PK/UQ [+ its extended properties]
+///   -> add FK [+ its extended properties] -> add full-text index -> add schema-bound view/function
+///   [+ its permissions/extended properties] -> add indexed-view's indexes [+ their extended
+///   properties] -> add default [+ its extended properties] -> add check [+ its extended properties]
 ///
 /// ALTER DATABASE ... COLLATE is deliberately placed BEFORE the recreate phase, not after it: SQL
 /// Server refuses to change the database's default collation while any object created without an
@@ -38,13 +38,26 @@ namespace Abs.DBCC.Infrastructure.Migration;
 /// A single global ordering of these phases (rather than a per-object topological sort) is sufficient
 /// for this object scope: nothing recreated in an earlier phase ever depends on something recreated in
 /// a later one (e.g. every foreign key is only added once all tables' columns/indexes already exist).
-/// The one exception is schema-bound views/functions that reference each other (e.g. an indexed
-/// wrapper view built WITH SCHEMABINDING on top of another schema-bound view): those are resolved with
-/// a proper dependency-closure and topological sort within their own phase - see
-/// <see cref="SchemaBoundObjectReference"/> and the ordering below.
+/// There are two exceptions. Schema-bound views/functions that reference each other (e.g. an indexed
+/// wrapper view built WITH SCHEMABINDING on top of another schema-bound view) are resolved with a
+/// proper dependency-closure and topological sort within their own phase - see
+/// <see cref="SchemaBoundObjectReference"/> and the ordering below. And check/default constraints are
+/// dropped before, and recreated after, schema-bound objects (not simply grouped with the other
+/// column-level constraints): their expression can call a schema-bound function, which SQL Server
+/// then refuses to drop while the constraint still references it (just like the view-on-view case,
+/// but for a constraint referencing a function) - and unlike a computed column, a constraint is never
+/// itself the *target* a schema-bound view depends on, so moving it earlier is always safe.
 ///
 /// Plain (non-schema-bound) views/procedures/functions/triggers never block ALTER COLUMN in SQL Server
 /// and are therefore never touched here - they are only captured for structural verification.
+///
+/// When <see cref="Build"/> is called with updateDatabaseDefaultCollation, the drop/recreate scope for
+/// schema-bound objects, check constraints, computed columns and filtered indexes widens from "tied to a
+/// changing column" to "every one of these in the entire database" - ALTER DATABASE ... COLLATE checks
+/// dependencies database-wide, not just on the columns being altered, and there is no catalog view that
+/// tells you in advance which of these implicitly depend on the database's default collation (only
+/// attempting the statement does). Column-scoped indexes/checks/defaults/computed columns tied to a
+/// changing column are still dropped for the usual ALTER COLUMN reason regardless of this flag.
 /// </summary>
 public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 {
@@ -66,10 +79,14 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 
         // WITH SCHEMABINDING views/functions are the only programmable objects that block ALTER COLUMN;
         // plain views/procedures/functions/triggers never block it and are left completely untouched.
-        var directSchemaBoundDrops = snapshot.SchemaBoundDependencies
-            .Where(dep => changingColumnsByTable.TryGetValue(dep.ReferencedTable, out var cols) && cols.Contains(dep.ReferencedColumn))
-            .Select(dep => dep.DependentObject)
-            .ToHashSet();
+        // When the database's default collation is also changing, ALTER DATABASE requires every
+        // schema-bound object in the database to be gone, not just the ones tied to a changing column.
+        var directSchemaBoundDrops = updateDatabaseDefaultCollation
+            ? snapshot.ProgrammableObjects.Where(o => o.IsSchemaBound).Select(o => o.Ref).ToHashSet()
+            : snapshot.SchemaBoundDependencies
+                .Where(dep => changingColumnsByTable.TryGetValue(dep.ReferencedTable, out var cols) && cols.Contains(dep.ReferencedColumn))
+                .Select(dep => dep.DependentObject)
+                .ToHashSet();
 
         // A schema-bound object that itself references another schema-bound object being dropped (e.g.
         // an indexed wrapper view built WITH SCHEMABINDING on top of another schema-bound view) must
@@ -130,24 +147,33 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
         var defaultsToDrop = new List<(TableSnapshot Table, DefaultConstraintSnapshot Default)>();
         var computedColumnsToDrop = new List<(TableSnapshot Table, ColumnSnapshot Column)>();
 
-        foreach (var table in tablesToAlter)
+        // A filtered index's predicate, and a check/default constraint's or computed column's
+        // expression, can all implicitly depend on the database's default collation regardless of which
+        // table/column they live on - so when that is also changing, every one of them in the database
+        // is in scope, not just the ones on a table with a changing column (those are still covered by
+        // the per-column checks below, for the usual ALTER COLUMN reason). A default/check constraint's
+        // expression can also simply call a schema-bound function that is about to be dropped for the
+        // same reason, which is an independent reason it needs to be in scope database-wide too.
+        foreach (var table in snapshot.Tables)
         {
-            var changingColumns = changingColumnsByTable[table.Ref];
+            var changingColumns = changingColumnsByTable.GetValueOrDefault(table.Ref, []);
 
             indexesToDrop.AddRange(table.Indexes
-                .Where(index => changingColumns.Any(index.CoversColumn))
+                .Where(index => changingColumns.Any(index.CoversColumn) ||
+                                 (updateDatabaseDefaultCollation && index.FilterDefinition is not null))
                 .Select(index => (table, index)));
 
             checksToDrop.AddRange(table.CheckConstraints
-                .Where(check => ReferencesAnyColumn(check.ColumnName, check.Definition, changingColumns))
+                .Where(check => updateDatabaseDefaultCollation || ReferencesAnyColumn(check.ColumnName, check.Definition, changingColumns))
                 .Select(check => (table, check)));
 
             defaultsToDrop.AddRange(table.DefaultConstraints
-                .Where(def => changingColumns.Contains(def.ColumnName))
+                .Where(def => updateDatabaseDefaultCollation || changingColumns.Contains(def.ColumnName))
                 .Select(def => (table, def)));
 
             computedColumnsToDrop.AddRange(table.Columns
-                .Where(col => col.IsComputed && ReferencesAnyColumn(null, col.ComputedDefinition ?? "", changingColumns))
+                .Where(col => col.IsComputed &&
+                              (updateDatabaseDefaultCollation || ReferencesAnyColumn(null, col.ComputedDefinition ?? "", changingColumns)))
                 .Select(col => (table, col)));
         }
 
@@ -156,6 +182,16 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
                 p.ParentTable == parentTable && p.Object.Kind == kind && string.Equals(p.Object.Name, name, StringComparison.OrdinalIgnoreCase));
 
         // Phase 1: drop everything that would block ALTER COLUMN, in dependency-safe order.
+        //
+        // Check/default constraints go first, before schema-bound objects: their expression can call a
+        // schema-bound function that is about to be dropped below, and a constraint is never itself
+        // something a schema-bound view/function depends on, so this is always safe.
+        foreach (var (table, check) in checksToDrop)
+            steps.Add(new MigrationStep(order++, MigrationStepKind.DropCheckConstraint, $"Check-Constraint {SqlIdentifier.QuotePart(check.Name)} auf {table.Ref} entfernen", CheckConstraintScriptGenerator.GenerateDrop(table.Ref, check)));
+
+        foreach (var (table, def) in defaultsToDrop)
+            steps.Add(new MigrationStep(order++, MigrationStepKind.DropDefaultConstraint, $"Default-Constraint {SqlIdentifier.QuotePart(def.Name)} auf {table.Ref} entfernen", DefaultConstraintScriptGenerator.GenerateDrop(table.Ref, def)));
+
         foreach (var obj in schemaBoundObjectsToDrop)
         {
             // An indexed view's own indexes must go before the view itself (SQL Server refuses to DROP
@@ -177,12 +213,6 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 
         foreach (var (table, index) in indexesToDrop)
             steps.Add(new MigrationStep(order++, MigrationStepKind.DropIndex, $"Index/Constraint {SqlIdentifier.QuotePart(index.Name)} auf {table.Ref} entfernen", IndexScriptGenerator.GenerateDrop(table.Ref, index)));
-
-        foreach (var (table, check) in checksToDrop)
-            steps.Add(new MigrationStep(order++, MigrationStepKind.DropCheckConstraint, $"Check-Constraint {SqlIdentifier.QuotePart(check.Name)} auf {table.Ref} entfernen", CheckConstraintScriptGenerator.GenerateDrop(table.Ref, check)));
-
-        foreach (var (table, def) in defaultsToDrop)
-            steps.Add(new MigrationStep(order++, MigrationStepKind.DropDefaultConstraint, $"Default-Constraint {SqlIdentifier.QuotePart(def.Name)} auf {table.Ref} entfernen", DefaultConstraintScriptGenerator.GenerateDrop(table.Ref, def)));
 
         foreach (var (table, column) in computedColumnsToDrop)
             steps.Add(new MigrationStep(order++, MigrationStepKind.DropComputedColumn, $"Berechnete Spalte {SqlIdentifier.QuotePart(column.Name)} auf {table.Ref} entfernen", ComputedColumnScriptGenerator.GenerateDrop(table.Ref, column)));
@@ -206,22 +236,6 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 
             foreach (var prop in snapshot.ExtendedProperties.Where(p => p.Object == table.Ref && p.ColumnName == column.Name))
                 steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {table.Ref}.{SqlIdentifier.QuotePart(column.Name)} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
-        }
-
-        foreach (var (table, def) in defaultsToDrop)
-        {
-            steps.Add(new MigrationStep(order++, MigrationStepKind.AddDefaultConstraint, $"Default-Constraint {SqlIdentifier.QuotePart(def.Name)} auf {table.Ref} wiederherstellen", DefaultConstraintScriptGenerator.GenerateCreate(table.Ref, def)));
-
-            foreach (var prop in ExtendedPropsFor(table.Ref, DatabaseObjectKind.DefaultConstraint, def.Name))
-                steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {SqlIdentifier.QuotePart(def.Name)} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
-        }
-
-        foreach (var (table, check) in checksToDrop)
-        {
-            steps.Add(new MigrationStep(order++, MigrationStepKind.AddCheckConstraint, $"Check-Constraint {SqlIdentifier.QuotePart(check.Name)} auf {table.Ref} wiederherstellen", CheckConstraintScriptGenerator.GenerateCreate(table.Ref, check)));
-
-            foreach (var prop in ExtendedPropsFor(table.Ref, DatabaseObjectKind.CheckConstraint, check.Name))
-                steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {SqlIdentifier.QuotePart(check.Name)} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
         }
 
         foreach (var (table, index) in indexesToDrop
@@ -270,6 +284,24 @@ public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
                 foreach (var prop in ExtendedPropsFor(obj.Ref, DatabaseObjectKind.Index, vi.Index.Name))
                     steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {SqlIdentifier.QuotePart(vi.Index.Name)} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
             }
+        }
+
+        // Recreated last, after schema-bound objects: a check/default constraint's expression can call
+        // a schema-bound function, which must exist again before the constraint can be recreated.
+        foreach (var (table, def) in defaultsToDrop)
+        {
+            steps.Add(new MigrationStep(order++, MigrationStepKind.AddDefaultConstraint, $"Default-Constraint {SqlIdentifier.QuotePart(def.Name)} auf {table.Ref} wiederherstellen", DefaultConstraintScriptGenerator.GenerateCreate(table.Ref, def)));
+
+            foreach (var prop in ExtendedPropsFor(table.Ref, DatabaseObjectKind.DefaultConstraint, def.Name))
+                steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {SqlIdentifier.QuotePart(def.Name)} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
+        }
+
+        foreach (var (table, check) in checksToDrop)
+        {
+            steps.Add(new MigrationStep(order++, MigrationStepKind.AddCheckConstraint, $"Check-Constraint {SqlIdentifier.QuotePart(check.Name)} auf {table.Ref} wiederherstellen", CheckConstraintScriptGenerator.GenerateCreate(table.Ref, check)));
+
+            foreach (var prop in ExtendedPropsFor(table.Ref, DatabaseObjectKind.CheckConstraint, check.Name))
+                steps.Add(new MigrationStep(order++, MigrationStepKind.AddExtendedProperty, $"Extended Property {SqlIdentifier.QuotePart(prop.PropertyName)} auf {SqlIdentifier.QuotePart(check.Name)} wiederherstellen", ExtendedPropertyScriptGenerator.GenerateAdd(prop)));
         }
 
         return new Domain.Migration.MigrationPlan(
