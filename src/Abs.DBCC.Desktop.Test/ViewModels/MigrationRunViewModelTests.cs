@@ -16,10 +16,8 @@ public class MigrationRunViewModelTests
 
     private static MigrationPlan Plan() => new(Collation, Collation, false, new DatabaseSnapshotBuilder().Build(), [], []);
 
-    // ExecuteMigrationCommand's ISender.Send call is awaited as the very first statement in RunAsync;
-    // Moq's ReturnsAsync/ThrowsAsync produce an already-completed task, so that await never yields, and
-    // the fire-and-forget "_ = RunAsync()" from the constructor runs to completion synchronously before
-    // the constructor call returns - no polling/waiting needed in these tests.
+    // Moq's ReturnsAsync/ThrowsAsync produce an already-completed task, so RunAsync's first await never
+    // yields and the constructor's fire-and-forget call runs to completion before the constructor returns.
 
     [Fact]
     public void Constructor_MigrationSucceeds_RaisesCompletedAndStopsRunning()
@@ -32,8 +30,7 @@ public class MigrationRunViewModelTests
         var vm = new MigrationRunViewModel(sender.Object, Profile, Plan());
         vm.Completed += (_, r) => raised = r;
 
-        // The fire-and-forget task already ran during construction (see comment above), so re-attaching
-        // Completed after construction would miss it; assert on the terminal VM state directly instead.
+        // Completed already fired during construction, so it can't be observed here; assert VM state instead.
         Assert.False(vm.IsRunning);
         Assert.False(vm.WasCancelled);
         Assert.False(vm.HasUnexpectedError);
@@ -56,9 +53,7 @@ public class MigrationRunViewModelTests
     [Fact]
     public void Constructor_ConnectionLostBeforeReportProduced_SetsUnexpectedErrorInsteadOfHanging()
     {
-        // Simulates a lost database connection surfacing as a SqlException that escapes
-        // ExecuteMigrationCommand entirely (e.g. the very first connection attempt fails), i.e. before
-        // MigrationOrchestrator ever gets to produce a MigrationReport.
+        // Simulates the connection attempt itself failing, before a MigrationReport can even be produced.
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<ExecuteMigrationCommand>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("A network-related or instance-specific error occurred."));
@@ -112,8 +107,7 @@ public class MigrationRunViewModelTests
     [Fact]
     public void Constructor_MultipleStepsReported_NewestStepIsFirstInStepResults()
     {
-        // Someone watching a running migration wants to see the latest step without scrolling - unlike
-        // the exported report (a separate, chronologically-ordered list), the live UI list is newest-first.
+        // Unlike the exported report, the live UI list is newest-first.
         var firstStep = new MigrationStepResult(new MigrationStep(0, MigrationStepKind.AlterColumnCollation, "first", "ALTER ..."), true, null, DateTime.Now);
         var secondStep = new MigrationStepResult(new MigrationStep(1, MigrationStepKind.AlterColumnCollation, "second", "ALTER ..."), true, null, DateTime.Now);
         var sender = new Mock<ISender>();

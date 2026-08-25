@@ -3,10 +3,6 @@ using MediatR;
 
 namespace Abs.DBCC.Application.Common.Behaviors;
 
-/// <summary>
-/// Führt alle registrierten FluentValidation-Validatoren für einen Command/Query aus,
-/// bevor der eigentliche Handler läuft.
-/// </summary>
 public sealed class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {

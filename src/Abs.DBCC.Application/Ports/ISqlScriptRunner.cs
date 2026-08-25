@@ -1,9 +1,6 @@
 namespace Abs.DBCC.Application.Ports;
 
-/// <summary>
-/// Thin abstraction over ADO.NET execution against one already-open database connection.
-/// This is the seam that keeps everything built on top of it mockable in unit tests.
-/// </summary>
+/// <summary>Thin ADO.NET abstraction over one already-open connection — the seam that keeps everything built on it mockable in unit tests.</summary>
 public interface ISqlScriptRunner : IAsyncDisposable
 {
     Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteQueryAsync(

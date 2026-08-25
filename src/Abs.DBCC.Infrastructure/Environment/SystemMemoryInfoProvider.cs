@@ -8,11 +8,8 @@ using Abs.DBCC.Application.Ports;
 namespace Abs.DBCC.Infrastructure.Environment;
 
 /// <summary>
-/// Reads current physical memory status using whatever the platform actually offers - the app itself
-/// ships for Windows, macOS (x64/arm64) and Linux (see the publish matrix in
-/// .github/workflows/build-test-release.yml), and this type is additionally constructed (through DI) by
-/// code that runs in CI on Linux (the Testcontainers-based integration tests), so every one of those
-/// needs a real reading rather than a placeholder.
+/// Reads physical memory using whatever the platform provides. The app ships for Windows, macOS
+/// (x64/arm64) and Linux, so each needs a real reading rather than a placeholder.
 /// </summary>
 public sealed class SystemMemoryInfoProvider : ISystemMemoryInfoProvider
 {
@@ -55,10 +52,7 @@ public sealed class SystemMemoryInfoProvider : ISystemMemoryInfoProvider
             : (0L, 0L);
     }
 
-    /// <summary>
-    /// /proc/meminfo is part of the kernel's procfs, always present on Linux, and requires no elevated
-    /// permissions to read - "MemTotal"/"MemAvailable" are both reported in kB.
-    /// </summary>
+    /// <summary>/proc/meminfo is always present on Linux and needs no elevated permissions; MemTotal/MemAvailable are reported in kB.</summary>
     private static (long AvailableBytes, long TotalBytes) GetLinuxPhysicalMemory()
     {
         try
@@ -93,11 +87,10 @@ public sealed class SystemMemoryInfoProvider : ISystemMemoryInfoProvider
     }
 
     /// <summary>
-    /// macOS has no single procfs-style file for this (and no BCL API either) - total physical memory
-    /// comes from the "hw.memsize" sysctl, and "available" is approximated as free + inactive +
-    /// speculative pages from vm_stat (all three are pages the kernel can hand out immediately or
-    /// reclaim without paging anything out - the same approximation Activity Monitor's "Memory Used"
-    /// figure is built from), converted to bytes via the page size vm_stat itself reports.
+    /// macOS has no procfs-style file or BCL API for this: total memory comes from the "hw.memsize"
+    /// sysctl, and "available" is approximated as free + inactive + speculative pages from vm_stat (the
+    /// same approximation behind Activity Monitor's "Memory Used"), converted to bytes via vm_stat's
+    /// own reported page size.
     /// </summary>
     private static (long AvailableBytes, long TotalBytes) GetMacOsPhysicalMemory()
     {

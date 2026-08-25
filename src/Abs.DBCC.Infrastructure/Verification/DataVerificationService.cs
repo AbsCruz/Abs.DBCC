@@ -6,16 +6,14 @@ using Abs.DBCC.Domain.Snapshot;
 namespace Abs.DBCC.Infrastructure.Verification;
 
 /// <summary>
-/// Captures a per-row hash for every row of every table (hashing the value as read back through the data
-/// reader - the correct level to compare at, since a collation change can alter the underlying byte
-/// representation of a string without changing its logical value) and compares two such captures.
+/// Captures a per-row hash for every row of every table, hashing values as read back through the data
+/// reader - the right level to compare at, since a collation change can alter a string's underlying bytes
+/// without changing its logical value.
 ///
-/// Rows are hashed and sorted by hash rather than kept verbatim and sorted by content: a heap table (no
-/// primary key/clustered index) has no guaranteed row order, and ALTER COLUMN can itself reorganize a
-/// heap's physical row order even when no cell's value actually changes, which would otherwise look like
-/// a false difference. Hashing also means a table's rows are streamed and discarded one at a time rather
-/// than held in memory all at once, so verifying a large database doesn't require its full content to fit
-/// in memory twice (before + after).
+/// Rows are sorted by hash, not content: a heap table has no guaranteed row order, and ALTER COLUMN can
+/// itself reorder a heap's rows even when no value changes, which would otherwise read as a false diff.
+/// Hashing also lets rows be streamed and discarded one at a time instead of held in memory, so
+/// verification doesn't need a table's full content in memory twice (before + after).
 /// </summary>
 public sealed class DataVerificationService(ISqlScriptRunnerFactory runnerFactory) : IDataVerificationService
 {
@@ -30,9 +28,8 @@ public sealed class DataVerificationService(ISqlScriptRunnerFactory runnerFactor
         {
             var table = snapshot.Tables[i];
 
-            // Reported before the query runs, not after: a single large table can dominate the whole
-            // phase's duration, and without this the UI would show no movement at all while it's being
-            // read - the table name at least tells the user what it's currently waiting on.
+            // Reported before the query runs: a large table can dominate the phase's duration, so
+            // reporting after would leave the UI showing no progress while it's being read.
             progress?.Report(new TableCaptureProgress(i + 1, totalTables, table.Ref.ToString()));
 
             var hashes = new List<string>();

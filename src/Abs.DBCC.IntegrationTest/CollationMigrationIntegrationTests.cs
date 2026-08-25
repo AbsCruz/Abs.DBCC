@@ -41,10 +41,9 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
 
         var plan = await sender.Send(new BuildMigrationPlanCommand(profile, TargetCollation, UpdateDatabaseDefaultCollation: true));
 
-        // Exercises PreflightCheckService's raw T-SQL against a real server - its queries are otherwise
-        // only unit-tested against a FakeSqlScriptRunner that echoes back whatever rows it's handed, so a
-        // reserved-keyword bug in the SQL text itself (e.g. an unquoted "RowCount" alias, which SQL
-        // Server rejects because ROWCOUNT is reserved) would not be caught anywhere else.
+        // Exercises PreflightCheckService's raw T-SQL against a real server; unit tests only run it
+        // against a FakeSqlScriptRunner that echoes back whatever rows it's handed, so a real SQL
+        // syntax or reserved-keyword bug in the query text would not be caught anywhere else.
         var preflight = await sender.Send(new GetPreflightCheckQuery(profile, plan));
         Assert.True(preflight.EstimatedAffectedRowCount >= 0);
 
@@ -54,12 +53,11 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
         Assert.NotNull(report.Verification);
         Assert.Empty(report.Verification.DataDiffs);
 
-        // Both dbo.OrdersByCustomerCodeRenamed (recreated under its post-sp_rename name, whose stored
-        // sys.sql_modules.definition still embedded the pre-rename one) and dbo.OrdersByCustomerCode
-        // (last deployed via ALTER, not CREATE) come back with a rewritten header - RawDefinitionScriptGenerator's
-        // deliberate, harmless normalization to the object's current identity. DatabaseSnapshotComparer
-        // replays each object's captured "before" text the same way the migration itself does before
-        // comparing, so neither rewrite is mistaken for a real structural change.
+        // dbo.OrdersByCustomerCodeRenamed (renamed via sp_rename, whose stored sys.sql_modules.definition
+        // still embeds the pre-rename name) and dbo.OrdersByCustomerCode (last deployed via ALTER, not
+        // CREATE) both come back with a rewritten header - RawDefinitionScriptGenerator's harmless
+        // normalization to the object's current identity. DatabaseSnapshotComparer replays each object's
+        // captured "before" text the same way first, so neither rewrite registers as a structural diff.
         Assert.Empty(report.Verification.StructuralDiffs);
 
         await AssertColumnsHaveTargetCollationAsync(profile);
@@ -201,19 +199,18 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
         while (await reader.ReadAsync())
             permissions.Add((reader.GetString(0), reader.GetString(1)));
 
-        // Two distinct SELECT/GRANT rows are expected: one object-level (ON dbo.Orders) and one
-        // schema-level (ON SCHEMA::dbo) - proving both survived, not just one of them.
+        // Expects two distinct SELECT/GRANT rows: one object-level (ON dbo.Orders) and one schema-level
+        // (ON SCHEMA::dbo), proving both survived.
         Assert.Equal(2, permissions.Count(p => p.Name == "SELECT" && p.State == "GRANT"));
         Assert.Contains(permissions, p => p.Name == "UPDATE" && p.State == "GRANT");
         Assert.Contains(permissions, p => p.Name == "DELETE" && p.State == "DENY");
     }
 
     /// <summary>
-    /// Proves the indexed view (a schema-bound view with its own unique clustered index plus an
-    /// additional nonclustered index) survived structurally intact and functional. Its very existence
-    /// after the migration already proves the clustered/nonclustered recreate ordering worked - had the
-    /// nonclustered index been created before its clustered sibling, SQL Server would have rejected it
-    /// outright and the migration would have failed rather than reaching this assertion.
+    /// Proves the indexed view (unique clustered index plus a nonclustered index) survived structurally
+    /// intact and functional. Reaching this assertion at all proves the clustered/nonclustered recreate
+    /// ordering worked, since SQL Server rejects creating a nonclustered index before its clustered
+    /// sibling exists.
     /// </summary>
     private static async Task AssertIndexedViewStillWorksAsync(ConnectionProfile profile)
     {
@@ -248,13 +245,11 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
     }
 
     /// <summary>
-    /// dbo.RegistrationLog has no character column at all, so it is never part of AffectedTables - it
-    /// only proves the "updateDatabaseDefaultCollation sweeps the whole database" behavior: its
-    /// schema-bound view, its filtered index, its DEFAULT/CHECK constraints (each calling the
-    /// schema-bound dbo.GetMinRegistrationDate function) and its IsValidFlag computed column (which
-    /// both calls that function AND is selected by the schema-bound view - the three-link chain that
-    /// required the combined drop/recreate ordering graph) must all have survived the migration and
-    /// still work exactly as before.
+    /// dbo.RegistrationLog has no character column, so it is never in AffectedTables - it exists purely
+    /// to prove the database-wide sweep: its schema-bound view, filtered index, DEFAULT/CHECK constraints
+    /// (each calling the schema-bound dbo.GetMinRegistrationDate function), and its IsValidFlag computed
+    /// column (which both calls that function and is selected by the schema-bound view, forming the
+    /// three-link chain the combined drop/recreate ordering graph must handle) must all survive intact.
     /// </summary>
     private static async Task AssertDatabaseWideSweepObjectsStillWorkAsync(ConnectionProfile profile)
     {
@@ -311,11 +306,11 @@ public sealed class CollationMigrationIntegrationTests(MsSqlContainerFixture fix
     }
 
     /// <summary>
-    /// dbo.OrdersByCustomerCodeRenamed was created under a different name and renamed with sp_rename -
+    /// dbo.OrdersByCustomerCodeRenamed was created under a different name and renamed with sp_rename, so
     /// its stored sys.sql_modules.definition still embeds the pre-rename name. Proves
-    /// RawDefinitionScriptGenerator rewrote that header on recreate: the view (and its own index, which
-    /// can only have been created successfully against the *current* name) must both exist and work
-    /// under the renamed identity, with no trace of the old name anywhere.
+    /// RawDefinitionScriptGenerator rewrote that header on recreate: the view and its own index (which
+    /// could only have been created against the *current* name) both exist and work under the renamed
+    /// identity, with no trace of the old name.
     /// </summary>
     private static async Task AssertRenamedViewStillWorksUnderItsCurrentNameAsync(ConnectionProfile profile)
     {

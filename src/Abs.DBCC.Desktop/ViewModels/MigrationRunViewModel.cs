@@ -21,11 +21,9 @@ public partial class MigrationRunViewModel : ViewModelBase
     private readonly Stopwatch _stopwatch = new();
 
     /// <summary>
-    /// A plain System.Timers.Timer (not Avalonia's DispatcherTimer): its Elapsed event fires on a
-    /// thread-pool thread, so the tick handler marshals the property update via Dispatcher.UIThread.Post
-    /// rather than setting it directly - unlike stepProgress/phaseProgress (which already run on the
-    /// original calling thread, see the comment in RunAsync), this genuinely happens on a different
-    /// thread. Posting is also silently harmless in unit tests, where nothing pumps the UI dispatcher.
+    /// A plain System.Timers.Timer, not Avalonia's DispatcherTimer: its Elapsed event fires on a
+    /// thread-pool thread, so the tick must marshal via Dispatcher.UIThread.Post. Posting is harmless
+    /// in unit tests too, where nothing pumps the UI dispatcher.
     /// </summary>
     private readonly System.Timers.Timer _elapsedTimeTimer = new(TimeSpan.FromSeconds(1)) { AutoReset = true };
 
@@ -153,19 +151,14 @@ public partial class MigrationRunViewModel : ViewModelBase
 
     private async Task RunAsync()
     {
-        // A direct callback, not System.Threading.Progress<T>: Progress<T> always marshals via
-        // SynchronizationContext.Post, which queues the update instead of applying it immediately - with
-        // several reports firing in quick succession (e.g. the CapturingRowsBefore phase's report
-        // immediately followed by ExecutingSteps once capture finishes), the queued posts can still be
-        // pending when the UI is inspected, so the displayed phase lags behind or appears stuck. Nothing
-        // in this call chain uses ConfigureAwait(false), so every await here already resumes on the same
-        // context RunAsync started on - these reports arrive already on the right thread, making the
-        // extra marshalling both unnecessary and the source of the lag.
+        // A direct callback, not System.Threading.Progress<T>: Progress<T> marshals via
+        // SynchronizationContext.Post, which queues updates and can lag behind when several reports fire
+        // in quick succession. Nothing here uses ConfigureAwait(false), so every await already resumes on
+        // RunAsync's original context, making that marshalling unnecessary.
         var stepProgress = new DirectProgress<MigrationStepResult>(result =>
         {
-            // Newest first: someone watching a running migration wants to see the latest step without
-            // scrolling, unlike the exported report (built from MigrationReport.StepResults, a separate,
-            // chronologically-ordered list unaffected by this UI-only ordering).
+            // Newest first for a live viewer; the exported report keeps MigrationReport.StepResults'
+            // chronological order.
             StepResults.Insert(0, result);
             CompletedStepCount++;
 
@@ -192,19 +185,18 @@ public partial class MigrationRunViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            // Cancellation stops the current step (which fails cleanly and rolls back, exactly like any
-            // other step failure - see MigrationOrchestrator) rather than corrupting or partially
-            // applying it; there is no MigrationReport for a run that never reached its handler's return.
+            // Cancellation fails the current step cleanly and rolls it back like any other step failure
+            // (see MigrationOrchestrator); no MigrationReport exists for a run that never reached the
+            // handler's return.
             IsRunning = false;
             StopElapsedTimer();
             WasCancelled = true;
         }
         catch (Exception ex)
         {
-            // Anything that escapes ExecuteMigrationCommand itself (e.g. the connection dropping before
-            // the orchestrator can even produce a MigrationReport - see MigrationOrchestrator.TryRollbackAsync
-            // for the case where it drops mid-step) must still leave this ViewModel in a defined terminal
-            // state rather than hanging forever with IsRunning still true and an unobserved exception.
+            // Anything escaping ExecuteMigrationCommand itself (e.g. the connection dropping before a
+            // MigrationReport exists) must still leave the ViewModel in a defined terminal state instead
+            // of hanging with IsRunning still true.
             IsRunning = false;
             StopElapsedTimer();
             HasUnexpectedError = true;

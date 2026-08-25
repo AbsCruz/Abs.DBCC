@@ -11,10 +11,9 @@ public enum MigrationPhaseKind
 }
 
 /// <summary>
-/// Reports which phase a migration run is currently in, and how far it has progressed within it.
-/// <paramref name="CurrentTableName"/> is set only for the table-by-table capture phases, so the UI can
-/// show which table is currently being read - useful since a single large table can dominate the whole
-/// phase's duration, during which the completed/total counters alone don't move.
+/// Reports which phase a migration run is in and its progress. <paramref name="CurrentTableName"/> is set
+/// only for the table-by-table capture phases, so the UI can show which table is being read even while a
+/// large table holds the completed/total counters still.
 /// </summary>
 public sealed record MigrationPhaseProgress(MigrationPhaseKind Kind, int Completed, int Total, string? CurrentTableName = null);
 

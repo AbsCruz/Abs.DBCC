@@ -63,13 +63,9 @@ public static class DatabaseSnapshotComparer
         if (before.DefinitionScript == after.DefinitionScript)
             return true;
 
-        // The migration replays the object's captured definition through RawDefinitionScriptGenerator,
-        // which rewrites a stale header (a non-CREATE keyword because the object's last deployment used
-        // ALTER, or a name/schema mismatch after an sp_rename) to match its current identity before
-        // recreating it. An object whose original text needed that rewrite therefore legitimately comes
-        // back with different header text even though nothing about it actually changed - replaying the
-        // "before" text the same way the migration itself would is what tells a real difference apart
-        // from this expected, harmless rewrite.
+        // RawDefinitionScriptGenerator rewrites a stale header (ALTER instead of CREATE, or a name/schema
+        // mismatch left by an sp_rename) to match the object's current identity before recreating it.
+        // Replaying the "before" text through the same generator separates that expected rewrite from a real change.
         var replayed = RawDefinitionScriptGenerator.GenerateCreate(new ObjectDefinition(after.Ref, before.DefinitionScript, before.IsSchemaBound));
         return replayed == after.DefinitionScript;
     }

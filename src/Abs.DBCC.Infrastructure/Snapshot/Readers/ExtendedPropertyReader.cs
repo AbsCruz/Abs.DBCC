@@ -4,10 +4,9 @@ using Abs.DBCC.Domain.Snapshot;
 namespace Abs.DBCC.Infrastructure.Snapshot.Readers;
 
 /// <summary>
-/// Reads sys.extended_properties for class 1 ("Object or Column" - tables, table columns including
-/// computed columns, views, procedures, functions, triggers, AND constraints, since PK/UQ/CHECK/
-/// DEFAULT/FK constraints are rows in sys.objects too with parent_object_id resolving to the owning
-/// table) and class 7 ("Index" - covers indexes on both tables and indexed views).
+/// Reads sys.extended_properties for class 1 (objects/columns - including constraints, which are rows in
+/// sys.objects with parent_object_id pointing to the owning table) and class 7 (indexes, on both tables
+/// and indexed views).
 /// </summary>
 public sealed class ExtendedPropertyReader
 {

@@ -14,9 +14,8 @@ internal static class ObjectTypeMapper
         "TR" => DatabaseObjectKind.Trigger,
         "SN" => DatabaseObjectKind.Synonym,
         "SO" => DatabaseObjectKind.Sequence,
-        // Constraints are rows in sys.objects too (confirmed against a real instance: their
-        // parent_object_id resolves straight to the owning table), so the same class-1
-        // "Object or Column" extended-property/permission path used for tables/views/etc. covers them.
+        // Constraints are sys.objects rows too, with parent_object_id pointing to the owning table, so
+        // they share the class-1 extended-property/permission path used for tables and views.
         "PK" => DatabaseObjectKind.PrimaryKey,
         "UQ" => DatabaseObjectKind.UniqueConstraint,
         "C" => DatabaseObjectKind.CheckConstraint,

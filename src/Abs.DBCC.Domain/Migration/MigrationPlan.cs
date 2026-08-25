@@ -12,10 +12,8 @@ public sealed record MigrationPlan(
     IReadOnlyList<ObjectRef> AffectedTables)
 {
     /// <summary>
-    /// True if the database and every table's columns are already in the target collation, so this plan
-    /// has no steps that would actually change anything (a database-collation-only plan built while
-    /// <see cref="UpdateDatabaseDefaultCollation"/> is requested but the database is already at the
-    /// target still counts as a no-op).
+    /// True if the database and every column are already at the target collation, i.e. this plan would
+    /// change nothing.
     /// </summary>
     public bool IsNoOp =>
         AffectedTables.Count == 0 && (!UpdateDatabaseDefaultCollation || SourceCollation.Value == TargetCollation.Value);

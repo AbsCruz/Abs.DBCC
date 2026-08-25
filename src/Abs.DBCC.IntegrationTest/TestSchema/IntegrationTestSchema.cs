@@ -4,34 +4,31 @@ namespace Abs.DBCC.IntegrationTest.TestSchema;
 /// One interconnected schema covering every object type this tool understands: tables with
 /// PK/unique/check/default constraints and a persisted computed column, a filtered index, two foreign
 /// keys (one touching an altered column, one not), a schema-bound view, an *indexed* schema-bound view
-/// (with its own unique clustered index plus an additional nonclustered index), a plain view, a trigger,
-/// a stored procedure, a scalar and a table-valued function, a sequence, a synonym, a full-text catalog
-/// and index, table/column/schema-level GRANT+DENY, and extended properties on a
-/// table/column/computed column/check constraint/index/the indexed view's own index. Batches are
-/// separated by a line containing only "GO", matching how SQL Server requires CREATE
-/// VIEW/PROCEDURE/FUNCTION/TRIGGER to be the first statement in their batch.
+/// (unique clustered index plus a nonclustered index), a plain view, a trigger, a stored procedure, a
+/// scalar and a table-valued function, a sequence, a synonym, a full-text catalog and index,
+/// table/column/schema-level GRANT+DENY, and extended properties on a table/column/computed
+/// column/check constraint/index/the indexed view's own index. Batches are separated by a line
+/// containing only "GO", matching SQL Server's requirement that CREATE VIEW/PROCEDURE/FUNCTION/TRIGGER
+/// be the first statement in their batch.
 ///
-/// dbo.RegistrationLog and everything hanging off it exist purely to prove the database-default-collation
-/// sweep (MigrationPlanBuilder, updateDatabaseDefaultCollation branch): it has no character column at all,
-/// so it never appears in AffectedTables, yet its schema-bound view, default/check constraints, computed
-/// column and filtered index must still be dropped and recreated around the ALTER DATABASE ... COLLATE
-/// step, purely because that statement's dependency check is database-wide. Its default/check constraints
-/// each call the schema-bound dbo.GetMinRegistrationDate function (requiring them to be dropped before,
-/// and recreated after, schema-bound objects), and its IsValidFlag computed column both calls that same
-/// function AND is selected by the schema-bound RegistrationLogSummary view - a three-link chain
-/// (view -> computed column -> function) that exercises the combined drop/recreate ordering graph in
-/// both directions at once.
+/// dbo.RegistrationLog exists purely to prove the database-wide sweep that updateDatabaseDefaultCollation
+/// triggers in MigrationPlanBuilder: it has no character column, so it never appears in AffectedTables,
+/// yet its schema-bound view, default/check constraints, computed column and filtered index still must be
+/// dropped and recreated around ALTER DATABASE ... COLLATE, because that statement's dependency check is
+/// database-wide. Its default/check constraints each call the schema-bound dbo.GetMinRegistrationDate
+/// function, and its IsValidFlag computed column both calls that function and is selected by the
+/// schema-bound RegistrationLogSummary view - a three-link chain (view -> computed column -> function)
+/// that exercises the combined drop/recreate ordering graph in both directions at once.
 ///
-/// dbo.OrdersByCustomerCodeRenamed is created under one name and immediately renamed with sp_rename to
-/// prove RawDefinitionScriptGenerator correctly rewrites a recreated object's header when its stored
-/// sys.sql_modules.definition (never touched by sp_rename) still embeds the pre-rename name.
+/// dbo.OrdersByCustomerCodeRenamed is created under one name and immediately renamed with sp_rename, to
+/// prove RawDefinitionScriptGenerator rewrites a recreated object's header when its stored
+/// sys.sql_modules.definition (untouched by sp_rename) still embeds the pre-rename name.
 ///
-/// dbo.OrdersByCustomerCode's last deployment statement is ALTER, not CREATE, and it carries a
-/// nonclustered index (IX_OrdersByCustomerCode_CustomerCode) alongside its materializing unique
-/// clustered index (IX_OrdersByCustomerCode_Id): the former proves DatabaseSnapshotComparer no longer
-/// flags the expected ALTER-to-CREATE header rewrite as a false-positive structural diff, and the
-/// latter proves the nonclustered index is recreated only after its clustered sibling (SQL Server
-/// rejects creating it otherwise) and dropped before it.
+/// dbo.OrdersByCustomerCode's last deployment statement is ALTER, not CREATE, and carries a nonclustered
+/// index alongside its materializing unique clustered index: the former proves DatabaseSnapshotComparer
+/// doesn't flag the expected ALTER-to-CREATE header rewrite as a structural diff, and the latter proves
+/// the nonclustered index is recreated only after its clustered sibling (SQL Server rejects it otherwise)
+/// and dropped before it.
 /// </summary>
 public static class IntegrationTestSchema
 {
@@ -194,10 +191,8 @@ public static class IntegrationTestSchema
 
     /// <summary>
     /// Separate from <see cref="Ddl"/> because the standard mcr.microsoft.com/mssql/server Linux image
-    /// does not ship the Full-Text Search component by default (it requires installing the
-    /// mssql-server-fts OS package, which a plain Testcontainers.MsSql image does not do) - the test
-    /// attempts this batch and treats "Full-Text Search is not installed" as a skip, not a failure,
-    /// for that portion of coverage. The rest of the schema (M2/M3/M5 object types) does not depend on it.
+    /// doesn't ship Full-Text Search by default, so the test treats "Full-Text Search is not installed"
+    /// as a skip, not a failure. The rest of the schema doesn't depend on it.
     /// </summary>
     public const string FullTextDdl = """
         CREATE FULLTEXT CATALOG TestCatalog AS DEFAULT;

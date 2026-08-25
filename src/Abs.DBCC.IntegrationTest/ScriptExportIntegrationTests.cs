@@ -40,17 +40,15 @@ public sealed class ScriptExportIntegrationTests(MsSqlContainerFixture fixture) 
         // Under the original case-insensitive source collation, both 'ABC-001' and 'abc-001' match.
         Assert.Equal(2, await CountOrdersWithCustomerCodeAsync(profile, "abc-001"));
 
-        // UpdateDatabaseDefaultCollation: true exercises the generator's harder path - the script must
-        // split into three segments around an ALTER DATABASE statement that cannot run inside a
-        // transaction, exactly like MigrationOrchestrator does at runtime (see MigrationOrchestrator's
-        // class comment).
+        // UpdateDatabaseDefaultCollation: true exercises the harder path - the script must split into
+        // three segments around an ALTER DATABASE statement that can't run inside a transaction, same as
+        // MigrationOrchestrator does at runtime.
         var plan = await sender.Send(new BuildMigrationPlanCommand(profile, TargetCollation, UpdateDatabaseDefaultCollation: true));
 
         var script = MigrationScriptGenerator.Generate(plan, databaseName);
 
-        // No MigrationOrchestrator/ExecuteMigrationCommand involved from here on - the script is executed
-        // the same way a user would run it themselves via sqlcmd/SSMS, using the fixture's plain
-        // GO-splitting batch runner.
+        // From here on, no MigrationOrchestrator involved - the script runs the way a user would via
+        // sqlcmd/SSMS, through the fixture's plain GO-splitting batch runner.
         await fixture.ExecuteBatchAsync(databaseName, script);
 
         await AssertColumnsHaveTargetCollationAsync(profile);

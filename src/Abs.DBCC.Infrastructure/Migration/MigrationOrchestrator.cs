@@ -7,20 +7,16 @@ namespace Abs.DBCC.Infrastructure.Migration;
 /// <summary>
 /// Executes a plan's steps in order against one open connection.
 ///
-/// When the plan does not touch the database's default collation (the common case), every step runs
-/// inside a single transaction, so a failure at any point rolls back to leave the database completely
-/// unchanged.
+/// When the plan doesn't touch the database's default collation, every step runs in a single
+/// transaction, so any failure rolls back to a fully unchanged database.
 ///
-/// When it does, SQL Server's own rules force a weaker guarantee: ALTER DATABASE ... COLLATE cannot run
-/// inside an explicit transaction, and it refuses to run at all while a collation-dependent object
-/// (dropped earlier, not yet recreated - see MigrationPlanBuilder) still exists in its OLD, un-recreated
-/// form. So execution splits into three segments: (1) everything up to and including the last drop and
-/// every ALTER COLUMN, in one transaction; (2) the ALTER DATABASE statement itself, outside any
-/// transaction; (3) every recreate step, in a second transaction. A failure in segment 1 rolls back to a
-/// fully unchanged database, same as always. A failure in segment 2 or 3 cannot be rolled back to that
-/// same starting point (the database COLLATE and/or some recreated objects are already committed), but
-/// it never corrupts or loses data - it leaves a safe, described, resumable state that a human needs to
-/// finish (typically by re-running the recreate steps still listed as pending in the report).
+/// When it does, SQL Server won't run ALTER DATABASE ... COLLATE inside an explicit transaction, and
+/// refuses it entirely while a dropped-but-not-yet-recreated object still exists in its old form (see
+/// MigrationPlanBuilder). So execution splits into three segments: (1) all drops and ALTER COLUMNs, in
+/// one transaction; (2) the ALTER DATABASE statement, outside any transaction; (3) all recreate steps, in
+/// a second transaction. A segment-1 failure rolls back cleanly. A segment-2/3 failure can't roll back to
+/// the original state (some changes are already committed) but never corrupts data - it leaves a safe,
+/// resumable state that a human finishes, typically by re-running the pending recreate steps.
 /// </summary>
 public sealed class MigrationOrchestrator(ISqlScriptRunnerFactory runnerFactory) : IMigrationOrchestrator
 {
@@ -96,12 +92,9 @@ public sealed class MigrationOrchestrator(ISqlScriptRunnerFactory runnerFactory)
     }
 
     /// <summary>
-    /// Attempts the rollback defensively: if the connection was lost mid-step (e.g. the network dropped,
-    /// or the server killed the session), SQL Server has already rolled the transaction back on its own
-    /// server-side, and the rollback call here fails not because anything is inconsistent but simply
-    /// because there is no live connection left to send it over. That failure must not be allowed to
-    /// propagate as a second, unhandled exception masking the original step failure - it is swallowed
-    /// and turned into an explanatory note for the report instead.
+    /// If the connection was lost mid-step, SQL Server already rolled the transaction back server-side,
+    /// and this call fails only because there's no live connection left to send it over. That failure is
+    /// swallowed into an explanatory note rather than masking the original step failure.
     /// </summary>
     private static async Task<string> TryRollbackAsync(ISqlScriptRunner runner, CancellationToken ct)
     {

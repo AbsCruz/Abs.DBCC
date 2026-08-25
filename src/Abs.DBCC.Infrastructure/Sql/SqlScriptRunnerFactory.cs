@@ -16,12 +16,8 @@ public sealed class SqlScriptRunnerFactory : ISqlScriptRunnerFactory
             Password = profile.Password,
             Encrypt = profile.Encrypt,
             TrustServerCertificate = profile.TrustServerCertificate,
-            // Pooling is off deliberately: this app opens only a handful of short-lived connections per
-            // operation (not a high-throughput service, so pooling buys nothing), and ALTER DATABASE ...
-            // COLLATE - part of the migration itself - causes SQL Server to invalidate sessions in a way
-            // that can leave a *pooled* connection silently broken for the next caller ("Resetting the
-            // connection results in a different state than the initial login... session is in the kill
-            // state"). Always establishing a fresh connection avoids that failure mode entirely.
+            // Pooling off: ALTER DATABASE ... COLLATE invalidates sessions in a way that can leave a pooled
+            // connection silently broken (kill state) for the next caller. A fresh connection avoids that.
             Pooling = false
         };
 

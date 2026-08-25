@@ -4,12 +4,10 @@ using Abs.DBCC.Domain.Snapshot;
 namespace Abs.DBCC.Infrastructure.Snapshot.Readers;
 
 /// <summary>
-/// Reads sys.sql_expression_dependencies for computed columns that directly reference a schema-bound
-/// view or function (e.g. a computed column defined as "dbo.SomeFunction(...)"). Neither
-/// <see cref="SchemaBoundDependencyReader"/> nor <see cref="SchemaBoundObjectReferenceReader"/> can see
-/// this: a computed column is not itself schema-bound, and it is not a table-column reference either -
-/// this reader fills that gap so the migration planner can order a computed column's drop/recreate
-/// correctly around the schema-bound object it calls.
+/// Reads sys.sql_expression_dependencies for computed columns that call a schema-bound view or function
+/// directly - a gap neither <see cref="SchemaBoundDependencyReader"/> nor
+/// <see cref="SchemaBoundObjectReferenceReader"/> covers, needed so the migration planner can order the
+/// column's drop/recreate around the object it calls.
 /// </summary>
 public sealed class ComputedColumnObjectReferenceReader
 {

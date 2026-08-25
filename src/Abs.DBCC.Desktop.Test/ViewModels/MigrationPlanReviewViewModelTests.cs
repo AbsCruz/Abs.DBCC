@@ -81,10 +81,8 @@ public class MigrationPlanReviewViewModelTests
     [Fact]
     public async Task LoadPreflightCommand_ReExecuted_RefreshesHasOtherActiveConnections()
     {
-        // Simulates the user clicking "check again" after the other sessions have disconnected. The
-        // constructor already triggers one load synchronously (Moq's ReturnsAsync task is pre-completed,
-        // so that first await never yields), so that first call is the "still active" result and the
-        // explicit re-execution below is the second, now-clear, result.
+        // The constructor's own load runs synchronously (Moq's ReturnsAsync task is pre-completed), consuming
+        // the first ("still active") result; the explicit re-execution below gets the second, now-clear, one.
         var callCount = 0;
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))

@@ -42,9 +42,8 @@ public class MigrationPlanBuilderTests
     [Fact]
     public void Build_UpdateDatabaseDefaultCollation_RunsRightAfterTheLastAlterColumnStep()
     {
-        // With no dependent objects to recreate, ALTER DATABASE is also the last step in this scenario -
-        // but the invariant under test is "immediately after the alters", not "always last" (see the
-        // full-dependency-scenario test below for a case where recreate steps follow it).
+        // The invariant is "right after the last ALTER COLUMN", not "always last" - it happens to be
+        // last here only because there's nothing to recreate (see the full-dependency test below).
         var table = new TableSnapshotBuilder("dbo", "Orders").WithColumn("Name", "varchar", Source.Value).Build();
         var snapshot = new DatabaseSnapshotBuilder().WithTable(table).Build();
 
@@ -73,8 +72,8 @@ public class MigrationPlanBuilderTests
             .WithDefaultConstraint("DF_Orders_CustomerName", "CustomerName", "('unknown')")
             .Build();
 
-        // OrderCustomerName is already on the target collation - it must stay untouched by ALTER COLUMN;
-        // it exists purely to prove the FK gets dropped because it references Orders.CustomerName, which changes.
+        // OrderCustomerName is already on the target collation, so it proves the FK is dropped because it
+        // references the changing Orders.CustomerName, not because of its own collation.
         var notes = new TableSnapshotBuilder("dbo", "Notes")
             .WithColumn("Id", "int", null, isNullable: false)
             .WithColumn("OrderCustomerName", "varchar", Target.Value, maxLength: 100)
@@ -89,7 +88,6 @@ public class MigrationPlanBuilderTests
         var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: true);
         var steps = plan.Steps;
 
-        // Everything that blocks ALTER COLUMN must be dropped.
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropForeignKey && s.Sql.Contains("FK_Notes_Orders"));
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropIndex && s.Sql.Contains("IX_Orders_CustomerName"));
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropCheckConstraint && s.Sql.Contains("CK_Orders_CustomerName"));
@@ -97,33 +95,28 @@ public class MigrationPlanBuilderTests
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropDefaultConstraint && s.Sql.Contains("DF_Orders_CustomerName"));
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropComputedColumn && s.Sql.Contains("DisplayName"));
 
-        // updateDatabaseDefaultCollation is true here, so even a check constraint unrelated to any
-        // changing column must be dropped and recreated too - see
-        // Build_UpdateDatabaseDefaultCollation_SweepsEveryCheckConstraintComputedColumnAndFilteredIndex
-        // for the dedicated test. The PK (a non-filtered index on a column that isn't changing) is
-        // untouched regardless, since plain indexes never depend on collation.
+        // updateDatabaseDefaultCollation is true, so even a check constraint unrelated to any changing
+        // column must be dropped/recreated (see the dedicated sweep test below). The PK is a non-filtered
+        // index on a non-changing column, so it stays untouched regardless.
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropCheckConstraint && s.Sql.Contains("CK_Orders_Unrelated"));
         Assert.DoesNotContain(steps, s => s.Kind == MigrationStepKind.DropIndex && s.Sql.Contains("PK_Orders"));
 
-        // Exactly one alter-column step, for CustomerName only.
         var alterSteps = steps.Where(s => s.Kind == MigrationStepKind.AlterColumnCollation).ToList();
         var alterStep = Assert.Single(alterSteps);
         Assert.Contains("CustomerName", alterStep.Sql);
 
-        // Everything dropped must be recreated.
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.AddComputedColumn && s.Sql.Contains("DisplayName"));
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.AddDefaultConstraint && s.Sql.Contains("DF_Orders_CustomerName"));
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.AddCheckConstraint && s.Sql.Contains("CK_Orders_CustomerName"));
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.CreateIndex && s.Sql.Contains("IX_Orders_CustomerName"));
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.AddForeignKey && s.Sql.Contains("FK_Notes_Orders"));
 
-        // Ordering invariants that make the plan actually executable against SQL Server.
         int IndexOfFirst(Func<MigrationStep, bool> predicate) => steps.ToList().FindIndex(s => predicate(s));
 
         Assert.True(IndexOfFirst(s => s.Kind == MigrationStepKind.DropForeignKey) < IndexOfFirst(s => s.Kind == MigrationStepKind.DropIndex));
         Assert.True(IndexOfFirst(s => s.Kind == MigrationStepKind.DropIndex) < IndexOfFirst(s => s.Kind == MigrationStepKind.AlterColumnCollation));
-        // ALTER DATABASE must run before any recreate step (it would otherwise be blocked by the very
-        // objects those steps are about to bring back) but after every ALTER COLUMN.
+        // ALTER DATABASE must run after every ALTER COLUMN but before any recreate step, since the
+        // objects those steps bring back would otherwise still block it.
         Assert.True(IndexOfFirst(s => s.Kind == MigrationStepKind.AlterColumnCollation) < IndexOfFirst(s => s.Kind == MigrationStepKind.AlterDatabaseCollation));
         Assert.True(IndexOfFirst(s => s.Kind == MigrationStepKind.AlterDatabaseCollation) < IndexOfFirst(s => s.Kind == MigrationStepKind.AddComputedColumn));
         Assert.True(IndexOfFirst(s => s.Kind == MigrationStepKind.CreateIndex) < IndexOfFirst(s => s.Kind == MigrationStepKind.AddForeignKey));
@@ -132,13 +125,11 @@ public class MigrationPlanBuilderTests
     [Fact]
     public void Build_UpdateDatabaseDefaultCollation_SweepsEveryCheckConstraintComputedColumnAndFilteredIndex()
     {
-        // Reproduces a real-world failure: ALTER DATABASE ... COLLATE checks dependencies across the
-        // WHOLE database, not just the columns being altered - a check constraint, computed column,
-        // filtered index or schema-bound view on a table that has nothing to do with the migrating
-        // column can still block it (SQL Server reports these by name, e.g. "Object 'X' depends on
-        // database collation"). There is no catalog view that predicts this in advance, so when this
-        // flag is set, every one of these across the database must be dropped and recreated regardless
-        // of which column(s) they touch.
+        // ALTER DATABASE ... COLLATE checks dependencies across the whole database, not just the
+        // migrating columns - a check constraint, computed column, filtered index or schema-bound view
+        // on an unrelated table can still block it, and no catalog view predicts this in advance. So
+        // with this flag set, every one of these in the database must be dropped/recreated regardless of
+        // which column(s) they touch.
         var orders = new TableSnapshotBuilder("dbo", "Orders")
             .WithColumn("Name", "varchar", Source.Value)
             .Build();
@@ -209,12 +200,10 @@ public class MigrationPlanBuilderTests
     [Fact]
     public void Build_UpdateDatabaseDefaultCollation_DropsDefaultAndCheckConstraintsBeforeTheFunctionTheyCall()
     {
-        // Reproduces a real-world failure: a DEFAULT constraint's expression calls a schema-bound
-        // function (e.g. "DEFAULT dbo.GetDefaultProcessingDate()"). SQL Server refuses to DROP FUNCTION while that
-        // constraint still references it - just like the view-on-view case, but for a constraint
-        // referencing a function - so the constraint must be dropped first (and only recreated once the
-        // function exists again), even though it is never itself a target a schema-bound object depends
-        // on, unlike a computed column.
+        // A default/check constraint whose expression calls a schema-bound function (e.g. "DEFAULT
+        // dbo.GetDefaultProcessingDate()") blocks DROP FUNCTION while it exists, so it must be dropped
+        // first and only recreated once the function exists again - even though, unlike a computed
+        // column, a constraint is never itself something a schema-bound object depends on.
         var orders = new TableSnapshotBuilder("dbo", "Orders")
             .WithColumn("Name", "varchar", Source.Value)
             .Build();
@@ -252,10 +241,9 @@ public class MigrationPlanBuilderTests
     [Fact]
     public void Build_ComputedColumnCallingSchemaBoundFunction_DropsColumnBeforeFunctionAndRecreatesAfter()
     {
-        // Unlike a check/default constraint, a computed column can also be the *target* a schema-bound
-        // view depends on (see the next test) - so it cannot simply always move earlier like a
-        // constraint. This is the "calls a function" direction: the column must still be dropped before
-        // the function it calls, and only recreated once that function exists again.
+        // Unlike a constraint, a computed column can also be the *target* a schema-bound view depends on
+        // (see the next test), so it can't simply always move earlier. This is the "calls a function"
+        // direction: it must still be dropped before, and recreated after, the function it calls.
         var orders = new TableSnapshotBuilder("dbo", "Orders")
             .WithColumn("Name", "varchar", Source.Value)
             .Build();
@@ -289,10 +277,8 @@ public class MigrationPlanBuilderTests
     [Fact]
     public void Build_ComputedColumnSelectedBySchemaBoundView_DropsViewBeforeColumnAndRecreatesAfter()
     {
-        // The opposite direction from the previous test: here the computed column is the target a
-        // schema-bound view depends on, so the view must be dropped first (and only recreated once the
-        // column exists again) - exactly the pre-existing behavior, now going through the same combined
-        // ordering machinery as the "calls a function" direction.
+        // The opposite direction: here the computed column is the target a schema-bound view depends on,
+        // so the view must be dropped first and only recreated once the column exists again.
         var log = new TableSnapshotBuilder("dbo", "RegistrationLog")
             .WithColumn("Id", "int", null, isNullable: false)
             .WithComputedColumn("Label", "'fixed'")
@@ -321,8 +307,8 @@ public class MigrationPlanBuilderTests
     [Fact]
     public void Build_ComputedColumnWithNoSchemaBoundRelationship_StillDropsAfterItsOwnIndexAndRecreatesBeforeIt()
     {
-        // A computed column untouched by any schema-bound relationship keeps its original, simpler
-        // ordering relative to a regular index built on it - unaffected by the combined phase above.
+        // A computed column with no schema-bound relationship keeps the simpler ordering relative to a
+        // regular index built on it, unaffected by the combined schema-bound/computed-column phase.
         var log = new TableSnapshotBuilder("dbo", "RegistrationLog")
             .WithColumn("Id", "int", null, isNullable: false)
             .WithComputedColumn("Label", "'fixed'", persisted: true)
@@ -451,14 +437,10 @@ public class MigrationPlanBuilderTests
     [Fact]
     public void Build_IndexedViewWithClusteredAndNonclusteredIndex_RecreatesClusteredFirstAndDropsClusteredLast()
     {
-        // Reproduces a real-world failure: an indexed view had both its materializing unique
-        // clustered index and an additional nonclustered index. Iterating the view's indexes in
-        // whatever order the snapshot happened to list them in (here deliberately the reverse of
-        // clustered-first, to make sure the fix doesn't just get lucky with alphabetical naming)
-        // put the nonclustered CREATE INDEX before the clustered one, which SQL Server rejects
-        // because a nonclustered index cannot be created on an indexed view before its one unique
-        // clustered index exists. Symmetrically, dropping the clustered index while the
-        // nonclustered one still exists is also rejected.
+        // SQL Server rejects creating a nonclustered index on an indexed view before its one unique
+        // clustered index exists, and rejects dropping that clustered index while a nonclustered one
+        // still exists. The snapshot lists the indexes in reverse of clustered-first order here, so the
+        // plan builder - not incidental input ordering - must be what puts them in the right sequence.
         var products = new TableSnapshotBuilder("dbo", "Products")
             .WithColumn("Id", "int", null, isNullable: false)
             .WithColumn("Name", "varchar", Source.Value)
@@ -493,11 +475,9 @@ public class MigrationPlanBuilderTests
     [Fact]
     public void Build_SchemaBoundViewReferencingAnotherSchemaBoundView_DropsWrapperBeforeBaseAndRecreatesInReverse()
     {
-        // Reproduces a real-world failure: an indexed base view directly referencing the changing
-        // column, wrapped by another schema-bound view that only references the base view (not the
-        // table). SchemaBoundDependencies alone would only find the base view; without resolving the
-        // wrapper's view-on-view reference too, DROP VIEW on the base view fails with SQL error 3729
-        // because the still-present wrapper still schema-binds to it.
+        // The wrapper view only references the base view, not the table, so SchemaBoundDependencies
+        // alone would miss it; without resolving that view-on-view reference too, DROP VIEW on the base
+        // view fails with SQL error 3729 because the still-present wrapper still schema-binds to it.
         var orders = new TableSnapshotBuilder("dbo", "Orders")
             .WithColumn("Id", "int", null, isNullable: false)
             .WithColumn("CustomerName", "varchar", Source.Value)
@@ -532,11 +512,8 @@ public class MigrationPlanBuilderTests
     [Fact]
     public void Build_SchemaBoundFunctionReferencingTwoOtherSchemaBoundObjects_DoesNotThrowOnDuplicateKey()
     {
-        // Regression test: a single dependent (here GetOrderSummary) can reference more than one other
-        // schema-bound object in its body. Building the "what does this object reference" lookup as a
-        // one-key-per-dependent Dictionary throws ArgumentException ("An item with the same key has
-        // already been added") the moment a dependent has two SchemaBoundObjectReferences rows - it must
-        // be a one-to-many lookup (grouped list), not a 1:1 dictionary.
+        // A single dependent (GetOrderSummary) can reference more than one other schema-bound object in
+        // its body, so the "what does this reference" lookup must be one-to-many, not a 1:1 dictionary.
         var orders = new TableSnapshotBuilder("dbo", "Orders")
             .WithColumn("Id", "int", null, isNullable: false)
             .WithColumn("CustomerName", "varchar", Source.Value)
@@ -593,8 +570,8 @@ public class MigrationPlanBuilderTests
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.DropFullTextIndex && s.Sql.Contains("Articles"));
         Assert.Contains(steps, s => s.Kind == MigrationStepKind.AddFullTextIndex && s.Sql.Contains("PK_Articles"));
 
-        // PK_Articles (on Id, unrelated to the changing Title column) must never be touched - the
-        // full-text index on Title must be dropped and recreated entirely on its own around the alter.
+        // PK_Articles is unrelated to the changing Title column, so the full-text index must be
+        // dropped/recreated entirely on its own, without touching any regular index.
         Assert.DoesNotContain(steps, s => s.Kind is MigrationStepKind.DropIndex or MigrationStepKind.CreateIndex);
 
         var dropFullText = steps.FindIndex(s => s.Kind == MigrationStepKind.DropFullTextIndex);
@@ -616,7 +593,7 @@ public class MigrationPlanBuilderTests
 
         var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: false);
 
-        Assert.Single(plan.Steps); // only the AlterColumnCollation step for Orders.Name
+        Assert.Single(plan.Steps);
     }
 
     [Fact]

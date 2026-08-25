@@ -17,10 +17,8 @@ public partial class MainViewModel : ViewModelBase
     public partial ViewModelBase CurrentViewModel { get; set; }
 
     /// <summary>
-    /// The connection currently in use, shown as a banner on every screen once set. Null while the
-    /// user is still on the connection setup screen (nothing confirmed yet); it is deliberately left
-    /// untouched when navigating to the migration result screen, so the banner still shows what the
-    /// just-completed migration ran against.
+    /// The connection currently in use, shown as a banner once set. Left untouched when navigating to
+    /// the migration result screen, so the banner still shows what the completed migration ran against.
     /// </summary>
     [ObservableProperty]
     public partial ConnectionProfile? CurrentProfile { get; set; }

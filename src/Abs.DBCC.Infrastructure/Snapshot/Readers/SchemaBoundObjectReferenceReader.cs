@@ -4,11 +4,10 @@ using Abs.DBCC.Domain.Snapshot;
 namespace Abs.DBCC.Infrastructure.Snapshot.Readers;
 
 /// <summary>
-/// Reads sys.sql_expression_dependencies for schema-bound (WITH SCHEMABINDING) views/functions that
-/// directly reference another view or function - e.g. an indexed wrapper view built WITH SCHEMABINDING
-/// on top of another schema-bound view. <see cref="SchemaBoundDependencyReader"/> only resolves
-/// dependencies down to a table column, so it cannot see this kind of view-on-view chain; this reader
-/// fills that gap so the migration planner can drop/recreate such chains in dependency-safe order.
+/// Reads sys.sql_expression_dependencies for schema-bound views/functions that reference another view or
+/// function directly (e.g. an indexed wrapper view built on another schema-bound view) -
+/// <see cref="SchemaBoundDependencyReader"/> only resolves down to a table column and misses this
+/// view-on-view chain, needed for dependency-safe drop/recreate ordering.
 /// </summary>
 public sealed class SchemaBoundObjectReferenceReader
 {

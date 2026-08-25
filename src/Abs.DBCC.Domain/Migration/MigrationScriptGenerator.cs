@@ -3,16 +3,15 @@ using System.Text;
 namespace Abs.DBCC.Domain.Migration;
 
 /// <summary>
-/// Renders a <see cref="MigrationPlan"/> as a stand-alone T-SQL script that reproduces exactly what
-/// <c>MigrationOrchestrator</c> would execute, for users who want to run (or review, or hand to a DBA)
-/// the migration outside the application - e.g. via sqlcmd or SSMS.
+/// Renders a <see cref="MigrationPlan"/> as a stand-alone T-SQL script reproducing exactly what
+/// <c>MigrationOrchestrator</c> would execute, for running (or reviewing, or handing to a DBA) outside the
+/// application, e.g. via sqlcmd or SSMS.
 ///
-/// The transaction structure mirrors the orchestrator: without a database-default-collation change,
-/// every step runs in one transaction. With one, SQL Server's own rule that <c>ALTER DATABASE ...
-/// COLLATE</c> cannot run inside an explicit transaction forces the same three-segment split (drop+alter
-/// in transaction 1, the ALTER DATABASE statement on its own, then the recreate steps in transaction 2).
-/// Each step is emitted as its own batch (<c>GO</c>) because a handful of step kinds (recreating a view,
-/// function, procedure, or trigger) must be the only statement in their batch.
+/// Transaction structure mirrors the orchestrator: without a database-default-collation change, everything
+/// runs in one transaction. With one, SQL Server forbids <c>ALTER DATABASE ... COLLATE</c> inside an
+/// explicit transaction, forcing a three-segment split (drop+alter, then the ALTER DATABASE statement
+/// alone, then the recreate steps). Each step is its own batch (<c>GO</c>) because recreating a view,
+/// function, procedure, or trigger must be the only statement in its batch.
 /// </summary>
 public static class MigrationScriptGenerator
 {

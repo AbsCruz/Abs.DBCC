@@ -91,11 +91,8 @@ public sealed class SqlScriptRunner(SqlConnection connection) : ISqlScriptRunner
         command.CommandText = sql;
         command.Transaction = _transaction;
 
-        // ADO.NET's default CommandTimeout is 30 seconds, which a large ALTER COLUMN (rewrites every row)
-        // or a SELECT * over a big table (data verification) can easily exceed - that's exactly what
-        // produced "Execution Timeout Expired" failures during real migrations. User-initiated cancellation
-        // is already handled via the CancellationToken passed to each ExecuteXxxAsync call, so removing
-        // SqlClient's own arbitrary cutoff (0 = wait indefinitely) doesn't remove the user's way out.
+        // ADO.NET's default 30s CommandTimeout can be exceeded by a large ALTER COLUMN or a big SELECT *
+        // during verification. Disabled (0 = wait indefinitely); cancellation is still handled via CancellationToken.
         command.CommandTimeout = 0;
 
         if (parameters is not null)

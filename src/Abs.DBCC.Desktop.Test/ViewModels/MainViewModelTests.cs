@@ -14,15 +14,13 @@ namespace Abs.DBCC.Desktop.Test.ViewModels;
 
 public class MainViewModelTests
 {
-    // UpdateDatabaseDefaultCollation:true with differing collations keeps MigrationPlan.IsNoOp false,
-    // so TargetCollationPickerViewModel.BuildPlanAsync actually raises PlanBuilt instead of bailing out.
+    // updateDatabaseDefaultCollation:true with differing collations keeps IsNoOp false, so BuildPlanCommand raises PlanBuilt instead of bailing out.
     private static MigrationPlan Plan() =>
         new(new("SQL_Latin1_General_CP1_CI_AS"), new("Latin1_General_100_CI_AS_SC_UTF8"),
             true, new DatabaseSnapshotBuilder().Build(), [], []);
 
-    // Every navigation target's constructor kicks off a fire-and-forget load - these tests only care
-    // about MainViewModel's own connection-banner bookkeeping, so every query is stubbed to a task that
-    // never completes rather than modelling each screen's full data.
+    // Every navigation target's constructor kicks off a fire-and-forget load; these tests only care about
+    // the connection banner, so unrelated queries are stubbed to a task that never completes.
     private static Mock<ISender> StubSender()
     {
         var sender = new Mock<ISender>();

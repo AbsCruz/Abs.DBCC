@@ -4,12 +4,10 @@ using Abs.DBCC.Domain.Snapshot;
 namespace Abs.DBCC.Infrastructure.Snapshot.Readers;
 
 /// <summary>
-/// Reads sys.database_permissions for class 0 (database-level), class 1 (object/column-level) and
-/// class 3 (schema-level) - covering the vast majority of real-world GRANT/DENY usage. Indexes and
-/// constraints are not grantable securables in SQL Server, so they never appear here (only their
-/// extended properties can - see ExtendedPropertyReader). More exotic securable classes (assemblies,
-/// certificates, symmetric/asymmetric keys, service broker objects, ...) remain a known scope
-/// limitation - see docs/BekannteEinschraenkungen.md.
+/// Reads sys.database_permissions for class 0 (database), class 1 (object/column) and class 3 (schema) -
+/// the classes covering ordinary GRANT/DENY usage. Indexes and constraints aren't grantable securables so
+/// they never appear here; other securable classes (assemblies, certificates, keys, service broker, ...)
+/// are a known scope limitation - see docs/BekannteEinschraenkungen.md.
 /// </summary>
 public sealed class PermissionReader
 {

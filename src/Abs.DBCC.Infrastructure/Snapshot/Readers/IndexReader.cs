@@ -4,9 +4,9 @@ using Abs.DBCC.Domain.Snapshot;
 namespace Abs.DBCC.Infrastructure.Snapshot.Readers;
 
 /// <summary>
-/// Reads sys.indexes/sys.index_columns for tables (plain indexes as well as PK/unique-constraint-backing
-/// indexes) and for schema-bound views (indexed views) - both are plain sys.indexes rows keyed by their
-/// parent object's object_id, whether that parent is a table (sys.objects.type = 'U') or a view ('V').
+/// Reads sys.indexes/sys.index_columns for tables (including PK/unique-constraint-backing indexes) and
+/// indexed views - both are sys.indexes rows keyed by the parent object_id, whether the parent is a
+/// table ('U') or a view ('V').
 /// </summary>
 public sealed class IndexReader
 {

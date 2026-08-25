@@ -25,7 +25,7 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
         TrustServerCertificate: true,
         Encrypt: true);
 
-    /// <summary>Creates a fresh, uniquely-named test database directly against master and returns its name.</summary>
+    /// <summary>Creates a fresh, uniquely-named test database directly against master.</summary>
     public async Task<string> CreateTestDatabaseAsync(CancellationToken ct = default)
     {
         var databaseName = $"CollationSwitcherTest_{Guid.NewGuid():N}";
@@ -51,10 +51,9 @@ public sealed class MsSqlContainerFixture : IAsyncLifetime
             Password = profile.Password,
             Encrypt = profile.Encrypt,
             TrustServerCertificate = profile.TrustServerCertificate,
-            // Must be off: a pooled-but-"closed" connection still counts as a session on the server, and
-            // the migration's ALTER DATABASE ... COLLATE step needs exclusive access to the database -
-            // a lingering pooled setup connection would make that step fail with "could not be
-            // exclusively locked", exactly like the production ISqlScriptRunnerFactory disables pooling.
+            // Must be off: a pooled-but-closed connection still counts as a session, blocking the
+            // migration's ALTER DATABASE ... COLLATE step, which needs exclusive database access - same
+            // reason production disables pooling.
             Pooling = false
         };
 

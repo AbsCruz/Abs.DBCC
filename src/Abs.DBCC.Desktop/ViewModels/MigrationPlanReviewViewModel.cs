@@ -29,10 +29,9 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
     public partial string? ErrorMessage { get; set; }
 
     /// <summary>
-    /// Skips the before/after row-hash capture and comparison for this run. Intended for a production run
-    /// once the same migration has already been verified (including its data) against a backup or a
-    /// secondary system - re-verifying the data again in production adds no safety there, only time and
-    /// memory. The structural check still runs regardless.
+    /// Skips the before/after row-hash capture and comparison. Intended for a production run once the
+    /// migration was already verified (including its data) against a backup or secondary system, where
+    /// re-verifying adds cost but no safety. The structural check still always runs.
     /// </summary>
     [ObservableProperty]
     public partial bool SkipDataVerification { get; set; }

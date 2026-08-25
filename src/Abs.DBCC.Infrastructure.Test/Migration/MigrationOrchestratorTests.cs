@@ -59,7 +59,7 @@ public class MigrationOrchestratorTests
 
         Assert.False(report.Succeeded);
         Assert.NotNull(report.FailureReason);
-        Assert.Equal(2, report.StepResults.Count); // the third step never ran
+        Assert.Equal(2, report.StepResults.Count);
         Assert.False(report.StepResults[1].Succeeded);
         Assert.True(runner.WasRolledBack);
         Assert.False(runner.WasCommitted);
@@ -84,7 +84,7 @@ public class MigrationOrchestratorTests
     public async Task ExecuteAsync_DatabaseCollationStepFails_TransactionalPartStaysCommitted()
     {
         var (sut, runner) = CreateSut();
-        runner.FailOnNonQueryCallNumber = 2; // the (only) database-collation call
+        runner.FailOnNonQueryCallNumber = 2; // the database-collation call
         var plan = Plan(
             new MigrationStep(0, MigrationStepKind.AlterColumnCollation, "alter", "ALTER TABLE ..."),
             new MigrationStep(1, MigrationStepKind.AlterDatabaseCollation, "db collation", "ALTER DATABASE CURRENT COLLATE ..."));
@@ -99,10 +99,9 @@ public class MigrationOrchestratorTests
     [Fact]
     public async Task ExecuteAsync_FailureAndRollbackBothFail_StillReturnsReportInsteadOfThrowing()
     {
-        // Simulates the connection dropping mid-step: the step itself fails, and the subsequent
-        // rollback attempt also fails because there is no live connection left to send it over.
-        // SQL Server has already rolled back server-side in that case, so this must not surface as
-        // an unhandled exception - see MigrationOrchestrator.TryRollbackAsync.
+        // Simulates a dropped connection: the step fails, then rollback itself fails since there's no
+        // connection left to send it over. SQL Server has already rolled back server-side by then, so
+        // this must not surface as an unhandled exception - see MigrationOrchestrator.TryRollbackAsync.
         var (sut, runner) = CreateSut();
         runner.FailOnNonQueryCallNumber = 2;
         runner.ThrowOnRollback = new InvalidOperationException("connection closed");
