@@ -1,3 +1,4 @@
+using System.Data;
 using System.Runtime.CompilerServices;
 using Abs.DBCC.Application.Ports;
 
@@ -10,9 +11,10 @@ namespace Abs.DBCC.TestCommon.Fakes;
 public sealed class FakeSqlScriptRunner : ISqlScriptRunner
 {
     private readonly Queue<IReadOnlyList<IReadOnlyDictionary<string, object?>>> _queryResults = new();
-    private readonly Queue<IReadOnlyList<IReadOnlyDictionary<string, object?>>> _streamResults = new();
     private readonly Queue<object?> _scalarResults = new();
     private int _nonQueryCallCount;
+    private int _beginTransactionCallCount;
+    private int _commitCallCount;
 
     public List<string> ExecutedSql { get; } = [];
     public bool IsDisposed { get; private set; }
@@ -29,11 +31,22 @@ public sealed class FakeSqlScriptRunner : ISqlScriptRunner
     /// <summary>When set, RollbackAsync throws this instead of rolling back - simulates the connection already being dead.</summary>
     public Exception? ThrowOnRollback { get; set; }
 
+    /// <summary>When set, the Nth call (1-based) to BeginTransactionAsync throws <see cref="ThrowOnTransactionBoundary"/> (or an OperationCanceledException).</summary>
+    public int? FailOnBeginTransactionCallNumber { get; set; }
+
+    /// <summary>When set, the Nth call (1-based) to CommitAsync throws <see cref="ThrowOnTransactionBoundary"/> (or an OperationCanceledException).</summary>
+    public int? FailOnCommitCallNumber { get; set; }
+
+    /// <summary>
+    /// Exception thrown by the matching Fail-On-*-CallNumber above; deliberately separate from
+    /// <see cref="ThrowOnExecute"/> (which, once set, throws unconditionally from every ExecuteXxxAsync
+    /// call when no specific FailOnNonQueryCallNumber is set - combining the two would make an
+    /// unrelated step fail too instead of just the targeted transaction boundary call).
+    /// </summary>
+    public Exception? ThrowOnTransactionBoundary { get; set; }
+
     public void EnqueueQueryResult(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows) =>
         _queryResults.Enqueue(rows);
-
-    public void EnqueueStreamResult(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows) =>
-        _streamResults.Enqueue(rows);
 
     public void EnqueueScalarResult(object? value) => _scalarResults.Enqueue(value);
 
@@ -50,21 +63,26 @@ public sealed class FakeSqlScriptRunner : ISqlScriptRunner
         return Task.FromResult(result);
     }
 
-    public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ExecuteQueryStreamAsync(
-        string sql, IReadOnlyDictionary<string, object?>? parameters = null, [EnumeratorCancellation] CancellationToken ct = default)
+    public IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ExecuteQueryStreamAsync(
+        string sql, IReadOnlyDictionary<string, object?>? parameters = null, CancellationToken ct = default)
     {
         ExecutedSql.Add(sql);
         if (ThrowOnExecute is not null)
             throw ThrowOnExecute;
 
-        var rows = _streamResults.Count > 0 ? _streamResults.Dequeue() : Array.Empty<IReadOnlyDictionary<string, object?>>();
+        var result = _queryResults.Count > 0 ? _queryResults.Dequeue() : Array.Empty<IReadOnlyDictionary<string, object?>>();
+        return StreamAsync(result, ct);
+    }
+
+    private static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamAsync(
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, [EnumeratorCancellation] CancellationToken ct)
+    {
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
             yield return row;
+            await Task.Yield();
         }
-
-        await Task.CompletedTask;
     }
 
     public Task<int> ExecuteNonQueryAsync(
@@ -75,7 +93,7 @@ public sealed class FakeSqlScriptRunner : ISqlScriptRunner
 
         if (FailOnNonQueryCallNumber == _nonQueryCallCount)
             throw ThrowOnExecute ?? new InvalidOperationException($"Simulated failure on non-query call {_nonQueryCallCount}.");
-        if (ThrowOnExecute is not null)
+        if (FailOnNonQueryCallNumber is null && ThrowOnExecute is not null)
             throw ThrowOnExecute;
 
         return Task.FromResult(0);
@@ -88,18 +106,33 @@ public sealed class FakeSqlScriptRunner : ISqlScriptRunner
         if (ThrowOnExecute is not null)
             throw ThrowOnExecute;
 
-        var value = _scalarResults.Count > 0 ? _scalarResults.Dequeue() : default;
-        return Task.FromResult((T?)value);
+        // Casting a boxed null straight to an unconstrained T? throws NullReferenceException instead of
+        // just producing default(T?) - returning early here avoids ever attempting that cast.
+        if (_scalarResults.Count == 0)
+            return Task.FromResult<T?>(default);
+
+        return Task.FromResult((T?)_scalarResults.Dequeue());
     }
 
-    public Task BeginTransactionAsync(CancellationToken ct = default)
+    public IsolationLevel? LastRequestedIsolationLevel { get; private set; }
+
+    public Task BeginTransactionAsync(IsolationLevel isolationLevel = IsolationLevel.Unspecified, CancellationToken ct = default)
     {
+        LastRequestedIsolationLevel = isolationLevel;
+        _beginTransactionCallCount++;
+        if (FailOnBeginTransactionCallNumber == _beginTransactionCallCount)
+            throw ThrowOnTransactionBoundary ?? new OperationCanceledException();
+
         IsInTransaction = true;
         return Task.CompletedTask;
     }
 
     public Task CommitAsync(CancellationToken ct = default)
     {
+        _commitCallCount++;
+        if (FailOnCommitCallNumber == _commitCallCount)
+            throw ThrowOnTransactionBoundary ?? new OperationCanceledException();
+
         IsInTransaction = false;
         WasCommitted = true;
         return Task.CompletedTask;

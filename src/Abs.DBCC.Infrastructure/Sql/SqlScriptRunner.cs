@@ -1,3 +1,4 @@
+using System.Data;
 using System.Runtime.CompilerServices;
 using Abs.DBCC.Application.Ports;
 using Microsoft.Data.SqlClient;
@@ -8,8 +9,13 @@ public sealed class SqlScriptRunner(SqlConnection connection) : ISqlScriptRunner
 {
     private SqlTransaction? _transaction;
 
-    public async Task BeginTransactionAsync(CancellationToken ct = default) =>
-        _transaction = (SqlTransaction)await connection.BeginTransactionAsync(ct);
+    public async Task BeginTransactionAsync(IsolationLevel isolationLevel = IsolationLevel.Unspecified, CancellationToken ct = default) =>
+        // SqlConnection.BeginTransactionAsync(IsolationLevel, ...) rejects IsolationLevel.Unspecified
+        // outright (it must be a concrete level) - the parameterless overload is the correct way to ask
+        // for the connection's normal default instead.
+        _transaction = (SqlTransaction)(isolationLevel == IsolationLevel.Unspecified
+            ? await connection.BeginTransactionAsync(ct)
+            : await connection.BeginTransactionAsync(isolationLevel, ct));
 
     public async Task CommitAsync(CancellationToken ct = default)
     {

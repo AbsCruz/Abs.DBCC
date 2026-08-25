@@ -9,6 +9,8 @@ namespace Abs.DBCC.Desktop.Views;
 
 public partial class MigrationResultView : UserControl
 {
+    private MigrationResultViewModel? _subscribedViewModel;
+
     public MigrationResultView()
     {
         InitializeComponent();
@@ -17,8 +19,12 @@ public partial class MigrationResultView : UserControl
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
-        if (DataContext is MigrationResultViewModel viewModel)
-            viewModel.ExportRequested += OnExportRequested;
+        if (_subscribedViewModel is not null)
+            _subscribedViewModel.ExportRequested -= OnExportRequested;
+
+        _subscribedViewModel = DataContext as MigrationResultViewModel;
+        if (_subscribedViewModel is not null)
+            _subscribedViewModel.ExportRequested += OnExportRequested;
     }
 
     private async void OnExportRequested(object? sender, string reportText)

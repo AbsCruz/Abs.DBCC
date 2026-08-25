@@ -9,6 +9,8 @@ namespace Abs.DBCC.Desktop.Views;
 
 public partial class MigrationPlanReviewView : UserControl
 {
+    private MigrationPlanReviewViewModel? _subscribedViewModel;
+
     public MigrationPlanReviewView()
     {
         InitializeComponent();
@@ -17,8 +19,12 @@ public partial class MigrationPlanReviewView : UserControl
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
-        if (DataContext is MigrationPlanReviewViewModel viewModel)
-            viewModel.ScriptExportRequested += OnScriptExportRequested;
+        if (_subscribedViewModel is not null)
+            _subscribedViewModel.ScriptExportRequested -= OnScriptExportRequested;
+
+        _subscribedViewModel = DataContext as MigrationPlanReviewViewModel;
+        if (_subscribedViewModel is not null)
+            _subscribedViewModel.ScriptExportRequested += OnScriptExportRequested;
     }
 
     private async void OnScriptExportRequested(object? sender, string script)
