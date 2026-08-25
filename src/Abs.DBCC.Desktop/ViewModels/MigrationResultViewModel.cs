@@ -37,7 +37,7 @@ public partial class MigrationResultViewModel(MigrationReport report) : ViewMode
         foreach (var step in Report.StepResults)
         {
             var status = step.Succeeded ? Strings.ReportStepOk : Strings.ReportStepError;
-            text.AppendLine($"  [{status}] {step.Step.Description}" + (step.Error is null ? "" : $" – {step.Error}"));
+            text.AppendLine($"  [{step.Timestamp:HH:mm:ss}] [{status}] {step.Step.Description}" + (step.Error is null ? "" : $" – {step.Error}"));
         }
 
         if (Report.Verification is not null)

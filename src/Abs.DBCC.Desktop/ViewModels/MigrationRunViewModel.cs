@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using Abs.DBCC.Application.Connections;
 using Abs.DBCC.Application.Migration;
 using Abs.DBCC.Desktop.Localization;
 using Abs.DBCC.Domain.Migration;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
@@ -16,6 +18,16 @@ public partial class MigrationRunViewModel : ViewModelBase
     private readonly MigrationPlan _plan;
     private readonly bool _skipDataVerification;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
+    private readonly Stopwatch _stopwatch = new();
+
+    /// <summary>
+    /// A plain System.Timers.Timer (not Avalonia's DispatcherTimer): its Elapsed event fires on a
+    /// thread-pool thread, so the tick handler marshals the property update via Dispatcher.UIThread.Post
+    /// rather than setting it directly - unlike stepProgress/phaseProgress (which already run on the
+    /// original calling thread, see the comment in RunAsync), this genuinely happens on a different
+    /// thread. Posting is also silently harmless in unit tests, where nothing pumps the UI dispatcher.
+    /// </summary>
+    private readonly System.Timers.Timer _elapsedTimeTimer = new(TimeSpan.FromSeconds(1)) { AutoReset = true };
 
     [ObservableProperty]
     public partial bool IsRunning { get; set; } = true;
@@ -46,6 +58,11 @@ public partial class MigrationRunViewModel : ViewModelBase
 
     [ObservableProperty]
     public partial string? CurrentTableName { get; set; }
+
+    [ObservableProperty]
+    public partial TimeSpan ElapsedTime { get; set; }
+
+    public string ElapsedTimeDisplay => ElapsedTime.ToString(@"hh\:mm\:ss");
 
     public int TotalStepCount { get; }
 
@@ -85,6 +102,10 @@ public partial class MigrationRunViewModel : ViewModelBase
         TotalStepCount = plan.Steps.Count;
         PhaseTotal = Math.Max(plan.PreSnapshot.Tables.Count, 1);
 
+        _elapsedTimeTimer.Elapsed += (_, _) => Dispatcher.UIThread.Post(() => ElapsedTime = _stopwatch.Elapsed);
+        _stopwatch.Start();
+        _elapsedTimeTimer.Start();
+
         _ = RunAsync();
     }
 
@@ -120,6 +141,16 @@ public partial class MigrationRunViewModel : ViewModelBase
 
     partial void OnCurrentTableNameChanged(string? value) => OnPropertyChanged(nameof(ShowCurrentTableName));
 
+    partial void OnElapsedTimeChanged(TimeSpan value) => OnPropertyChanged(nameof(ElapsedTimeDisplay));
+
+    /// <summary>Stops the ticking timer and takes one final, precise reading - the last tick can be up to a second stale.</summary>
+    private void StopElapsedTimer()
+    {
+        _elapsedTimeTimer.Stop();
+        _stopwatch.Stop();
+        ElapsedTime = _stopwatch.Elapsed;
+    }
+
     private async Task RunAsync()
     {
         // A direct callback, not System.Threading.Progress<T>: Progress<T> always marshals via
@@ -132,7 +163,10 @@ public partial class MigrationRunViewModel : ViewModelBase
         // extra marshalling both unnecessary and the source of the lag.
         var stepProgress = new DirectProgress<MigrationStepResult>(result =>
         {
-            StepResults.Add(result);
+            // Newest first: someone watching a running migration wants to see the latest step without
+            // scrolling, unlike the exported report (built from MigrationReport.StepResults, a separate,
+            // chronologically-ordered list unaffected by this UI-only ordering).
+            StepResults.Insert(0, result);
             CompletedStepCount++;
 
             if (Phase == MigrationPhaseKind.ExecutingSteps)
@@ -153,6 +187,7 @@ public partial class MigrationRunViewModel : ViewModelBase
                 new ExecuteMigrationCommand(_profile, _plan, stepProgress, phaseProgress, _skipDataVerification),
                 _cancellationTokenSource.Token);
             IsRunning = false;
+            StopElapsedTimer();
             Completed?.Invoke(this, report);
         }
         catch (OperationCanceledException)
@@ -161,6 +196,7 @@ public partial class MigrationRunViewModel : ViewModelBase
             // other step failure - see MigrationOrchestrator) rather than corrupting or partially
             // applying it; there is no MigrationReport for a run that never reached its handler's return.
             IsRunning = false;
+            StopElapsedTimer();
             WasCancelled = true;
         }
         catch (Exception ex)
@@ -170,6 +206,7 @@ public partial class MigrationRunViewModel : ViewModelBase
             // for the case where it drops mid-step) must still leave this ViewModel in a defined terminal
             // state rather than hanging forever with IsRunning still true and an unobserved exception.
             IsRunning = false;
+            StopElapsedTimer();
             HasUnexpectedError = true;
             UnexpectedErrorMessage = ex.Message;
         }

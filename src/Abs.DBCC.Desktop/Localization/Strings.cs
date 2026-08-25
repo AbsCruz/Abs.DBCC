@@ -106,6 +106,7 @@ public static class Strings
     public static string ConnectionLostTitle => L("Datenbankverbindung verloren.", "Database connection lost.");
     public static string MigrationCompletedTitle => L("Migration abgeschlossen.", "Migration completed.");
     public static string StepsSuffix => L(" Schritte", " steps");
+    public static string ElapsedTimeLabel => L("Verstrichene Zeit: ", "Elapsed time: ");
     public static string CancelButton => L("Abbrechen", "Cancel");
     public static string BackToStartButton => L("Zurück zum Start", "Back to Start");
 

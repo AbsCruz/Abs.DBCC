@@ -1,6 +1,6 @@
 namespace Abs.DBCC.Domain.Migration;
 
-public sealed record MigrationStepResult(MigrationStep Step, bool Succeeded, string? Error);
+public sealed record MigrationStepResult(MigrationStep Step, bool Succeeded, string? Error, DateTime Timestamp);
 
 public sealed record MigrationReport(
     bool Succeeded,

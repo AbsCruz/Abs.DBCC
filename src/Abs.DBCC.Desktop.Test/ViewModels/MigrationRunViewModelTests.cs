@@ -110,6 +110,28 @@ public class MigrationRunViewModelTests
     }
 
     [Fact]
+    public void Constructor_MultipleStepsReported_NewestStepIsFirstInStepResults()
+    {
+        // Someone watching a running migration wants to see the latest step without scrolling - unlike
+        // the exported report (a separate, chronologically-ordered list), the live UI list is newest-first.
+        var firstStep = new MigrationStepResult(new MigrationStep(0, MigrationStepKind.AlterColumnCollation, "first", "ALTER ..."), true, null, DateTime.Now);
+        var secondStep = new MigrationStepResult(new MigrationStep(1, MigrationStepKind.AlterColumnCollation, "second", "ALTER ..."), true, null, DateTime.Now);
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<ExecuteMigrationCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<IRequest<MigrationReport>, CancellationToken>((req, _) =>
+            {
+                var cmd = (ExecuteMigrationCommand)req;
+                cmd.Progress?.Report(firstStep);
+                cmd.Progress?.Report(secondStep);
+            })
+            .ReturnsAsync(new MigrationReport(true, [firstStep, secondStep], null, null));
+
+        var vm = new MigrationRunViewModel(sender.Object, Profile, Plan());
+
+        Assert.Equal(["second", "first"], vm.StepResults.Select(r => r.Step.Description));
+    }
+
+    [Fact]
     public void AcknowledgeUnexpectedErrorCommand_RaisesUnexpectedErrorAcknowledged()
     {
         var sender = new Mock<ISender>();

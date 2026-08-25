@@ -124,11 +124,11 @@ public sealed class MigrationOrchestrator(ISqlScriptRunnerFactory runnerFactory)
         try
         {
             await runner.ExecuteNonQueryAsync(step.Sql, ct: ct);
-            return new MigrationStepResult(step, true, null);
+            return new MigrationStepResult(step, true, null, DateTime.Now);
         }
         catch (Exception ex)
         {
-            return new MigrationStepResult(step, false, ex.Message);
+            return new MigrationStepResult(step, false, ex.Message, DateTime.Now);
         }
     }
 }

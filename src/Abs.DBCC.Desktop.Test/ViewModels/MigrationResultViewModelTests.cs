@@ -11,9 +11,10 @@ public class MigrationResultViewModelTests
     [Fact]
     public void BuildReportText_SuccessfulRun_MentionsSuccessAndEachStep()
     {
+        var timestamp = new DateTime(2026, 1, 1, 12, 34, 56);
         var report = new MigrationReport(
             true,
-            [new MigrationStepResult(Step("Collation von [dbo].[Orders].[Name] ändern"), true, null)],
+            [new MigrationStepResult(Step("Collation von [dbo].[Orders].[Name] ändern"), true, null, timestamp)],
             null,
             new VerificationResult([], []));
         var vm = new MigrationResultViewModel(report);
@@ -24,14 +25,16 @@ public class MigrationResultViewModelTests
         Assert.Contains($"[{Strings.ReportStepOk}]", text);
         Assert.Contains("Collation von [dbo].[Orders].[Name] ändern", text);
         Assert.Contains(Strings.ReportNoDiscrepancies, text);
+        Assert.Contains(timestamp.ToString("HH:mm:ss"), text);
     }
 
     [Fact]
     public void BuildReportText_FailedRun_IncludesFailureReasonAndFailedStepError()
     {
+        var timestamp = new DateTime(2026, 1, 1, 12, 34, 56);
         var report = new MigrationReport(
             false,
-            [new MigrationStepResult(Step("Index entfernen"), false, "boom")],
+            [new MigrationStepResult(Step("Index entfernen"), false, "boom", timestamp)],
             "Schritt 'Index entfernen' fehlgeschlagen: boom",
             null);
         var vm = new MigrationResultViewModel(report);
@@ -42,6 +45,7 @@ public class MigrationResultViewModelTests
         Assert.Contains("Schritt 'Index entfernen' fehlgeschlagen: boom", text);
         Assert.Contains($"[{Strings.ReportStepError}]", text);
         Assert.Contains("boom", text);
+        Assert.Contains(timestamp.ToString("HH:mm:ss"), text);
     }
 
     [Fact]
