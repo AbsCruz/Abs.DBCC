@@ -6,7 +6,8 @@ public sealed record DataDiff(string TableDescription, string Details);
 
 public sealed record VerificationResult(
     IReadOnlyList<StructuralDiff> StructuralDiffs,
-    IReadOnlyList<DataDiff> DataDiffs)
+    IReadOnlyList<DataDiff> DataDiffs,
+    bool DataVerificationSkipped = false)
 {
     public bool IsSuccess => StructuralDiffs.Count == 0 && DataDiffs.Count == 0;
 }

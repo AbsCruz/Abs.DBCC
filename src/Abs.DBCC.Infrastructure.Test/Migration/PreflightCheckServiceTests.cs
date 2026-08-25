@@ -19,7 +19,9 @@ public class PreflightCheckServiceTests
         var runner = new FakeSqlScriptRunner();
         var factory = new Mock<ISqlScriptRunnerFactory>();
         factory.Setup(f => f.CreateAsync(Profile, It.IsAny<CancellationToken>())).ReturnsAsync(runner);
-        return (new PreflightCheckService(factory.Object), runner);
+        var systemMemory = new Mock<ISystemMemoryInfoProvider>();
+        systemMemory.Setup(m => m.GetPhysicalMemory()).Returns((8_000_000_000L, 16_000_000_000L));
+        return (new PreflightCheckService(factory.Object, systemMemory.Object), runner);
     }
 
     private static Dictionary<string, object?> LogSpaceRow(long totalBytes, double usedPercent) =>
@@ -44,6 +46,9 @@ public class PreflightCheckServiceTests
 
         Assert.Equal(2, result.OtherActiveSessionCount);
         Assert.Equal(100, result.EstimatedAffectedRowCount);
+        Assert.Equal(100 + 99999, result.TotalRowCount);
+        Assert.Equal(8_000_000_000L, result.AvailableMemoryBytes);
+        Assert.Equal(16_000_000_000L, result.TotalMemoryBytes);
     }
 
     [Fact]

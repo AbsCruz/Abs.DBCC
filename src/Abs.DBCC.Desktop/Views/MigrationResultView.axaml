@@ -24,6 +24,9 @@
             <TextBlock Text="{x:Static res:Strings.DiscrepanciesFound}"
                        Foreground="OrangeRed"
                        IsVisible="{Binding !Report.Verification.IsSuccess}" />
+            <TextBlock Text="{x:Static res:Strings.DataVerificationSkippedNote}"
+                       Foreground="Gray"
+                       IsVisible="{Binding Report.Verification.DataVerificationSkipped}" />
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">

@@ -72,6 +72,44 @@ public class MigrationRunViewModelTests
     }
 
     [Fact]
+    public void Constructor_CapturingRowsBeforePhaseReported_ShowsCurrentTableNameAndCount()
+    {
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<ExecuteMigrationCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<IRequest<MigrationReport>, CancellationToken>((req, _) =>
+                ((ExecuteMigrationCommand)req).PhaseProgress?.Report(new MigrationPhaseProgress(MigrationPhaseKind.CapturingRowsBefore, 2, 5, "[dbo].[Orders]")))
+            .Returns(new TaskCompletionSource<MigrationReport>().Task); // never completes - Phase stays at this report
+
+        var vm = new MigrationRunViewModel(sender.Object, Profile, Plan());
+
+        Assert.Equal(MigrationPhaseKind.CapturingRowsBefore, vm.Phase);
+        Assert.Equal("[dbo].[Orders]", vm.CurrentTableName);
+        Assert.True(vm.ShowCurrentTableName);
+        Assert.Equal(2, vm.PhaseCompleted);
+        Assert.Equal(5, vm.PhaseTotal);
+    }
+
+    [Fact]
+    public void Constructor_PhaseAdvancesPastCapturingRowsBefore_SwitchesPhaseAndHidesTableName()
+    {
+        var report = new MigrationReport(true, [], null, null);
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<ExecuteMigrationCommand>(), It.IsAny<CancellationToken>()))
+            .Callback<IRequest<MigrationReport>, CancellationToken>((req, _) =>
+            {
+                var cmd = (ExecuteMigrationCommand)req;
+                cmd.PhaseProgress?.Report(new MigrationPhaseProgress(MigrationPhaseKind.CapturingRowsBefore, 1, 1, "[dbo].[Orders]"));
+                cmd.PhaseProgress?.Report(new MigrationPhaseProgress(MigrationPhaseKind.ExecutingSteps, 0, 0));
+            })
+            .ReturnsAsync(report);
+
+        var vm = new MigrationRunViewModel(sender.Object, Profile, Plan());
+
+        Assert.Equal(MigrationPhaseKind.ExecutingSteps, vm.Phase);
+        Assert.False(vm.ShowCurrentTableName);
+    }
+
+    [Fact]
     public void AcknowledgeUnexpectedErrorCommand_RaisesUnexpectedErrorAcknowledged()
     {
         var sender = new Mock<ISender>();

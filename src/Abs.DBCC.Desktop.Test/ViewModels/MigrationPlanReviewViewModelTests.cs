@@ -26,7 +26,7 @@ public class MigrationPlanReviewViewModelTests
             new MigrationStep(2, MigrationStepKind.AlterColumnCollation, "c", "sql"));
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0));
+            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0, 0, 0, 0));
 
         var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, plan);
 
@@ -40,7 +40,7 @@ public class MigrationPlanReviewViewModelTests
     {
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PreflightCheckResult(1, 100, 10_485_760, 50.0));
+            .ReturnsAsync(new PreflightCheckResult(1, 100, 0, 10_485_760, 50.0, 0, 0));
 
         var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
         await vm.LoadPreflightCommand.ExecuteAsync(null);
@@ -57,7 +57,7 @@ public class MigrationPlanReviewViewModelTests
     {
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PreflightCheckResult(2, 0, 0, 0));
+            .ReturnsAsync(new PreflightCheckResult(2, 0, 0, 0, 0, 0, 0));
 
         var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
         await vm.LoadPreflightCommand.ExecuteAsync(null);
@@ -70,7 +70,7 @@ public class MigrationPlanReviewViewModelTests
     {
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0));
+            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0, 0, 0, 0));
 
         var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
         await vm.LoadPreflightCommand.ExecuteAsync(null);
@@ -88,7 +88,7 @@ public class MigrationPlanReviewViewModelTests
         var callCount = 0;
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new PreflightCheckResult(++callCount == 1 ? 2 : 0, 0, 0, 0));
+            .ReturnsAsync(() => new PreflightCheckResult(++callCount == 1 ? 2 : 0, 0, 0, 0, 0, 0, 0));
 
         var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
         Assert.True(vm.HasOtherActiveConnections);
@@ -112,6 +112,46 @@ public class MigrationPlanReviewViewModelTests
     }
 
     [Fact]
+    public async Task AvailableMemoryDisplay_ShowsAvailableAndTotalMemory()
+    {
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0, 0, 4_294_967_296, 17_179_869_184));
+
+        var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
+        await vm.LoadPreflightCommand.ExecuteAsync(null);
+
+        Assert.Contains("4", vm.AvailableMemoryDisplay);
+        Assert.Contains("16", vm.AvailableMemoryDisplay);
+    }
+
+    [Fact]
+    public async Task EstimatedMemoryExceedsAvailable_True_WhenEstimateIsLargerThanAvailableMemory()
+    {
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PreflightCheckResult(0, 0, TotalRowCount: 1_000_000_000, 0, 0, AvailableMemoryBytes: 1, TotalMemoryBytes: 1));
+
+        var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
+        await vm.LoadPreflightCommand.ExecuteAsync(null);
+
+        Assert.True(vm.EstimatedMemoryExceedsAvailable);
+    }
+
+    [Fact]
+    public async Task EstimatedMemoryExceedsAvailable_False_WhenEstimateFitsInAvailableMemory()
+    {
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PreflightCheckResult(0, 0, TotalRowCount: 10, 0, 0, AvailableMemoryBytes: 1_000_000_000, TotalMemoryBytes: 1_000_000_000));
+
+        var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
+        await vm.LoadPreflightCommand.ExecuteAsync(null);
+
+        Assert.False(vm.EstimatedMemoryExceedsAvailable);
+    }
+
+    [Fact]
     public void TransactionLogDisplay_WithoutPreflightLoaded_IsNull()
     {
         var sender = new Mock<ISender>();
@@ -129,9 +169,9 @@ public class MigrationPlanReviewViewModelTests
         var plan = Plan();
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0));
+            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0, 0, 0, 0));
         var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, plan);
-        (ConnectionProfile Profile, MigrationPlan Plan)? raised = null;
+        (ConnectionProfile Profile, MigrationPlan Plan, bool SkipDataVerification)? raised = null;
         vm.StartRequested += (_, args) => raised = args;
 
         vm.StartCommand.Execute(null);
@@ -139,6 +179,23 @@ public class MigrationPlanReviewViewModelTests
         Assert.NotNull(raised);
         Assert.Equal(Profile, raised.Value.Profile);
         Assert.Same(plan, raised.Value.Plan);
+        Assert.False(raised.Value.SkipDataVerification);
+    }
+
+    [Fact]
+    public void StartCommand_SkipDataVerificationChecked_RaisesStartRequestedWithSkipDataVerificationTrue()
+    {
+        var sender = new Mock<ISender>();
+        sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0, 0, 0, 0));
+        var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, Plan());
+        (ConnectionProfile Profile, MigrationPlan Plan, bool SkipDataVerification)? raised = null;
+        vm.StartRequested += (_, args) => raised = args;
+        vm.SkipDataVerification = true;
+
+        vm.StartCommand.Execute(null);
+
+        Assert.True(raised?.SkipDataVerification);
     }
 
     [Fact]
@@ -147,7 +204,7 @@ public class MigrationPlanReviewViewModelTests
         var plan = Plan(new MigrationStep(0, MigrationStepKind.AlterColumnCollation, "alter", "ALTER TABLE ..."));
         var sender = new Mock<ISender>();
         sender.Setup(s => s.Send(It.IsAny<GetPreflightCheckQuery>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0));
+            .ReturnsAsync(new PreflightCheckResult(0, 0, 0, 0, 0, 0, 0));
         var vm = new MigrationPlanReviewViewModel(sender.Object, Profile, plan);
         string? script = null;
         vm.ScriptExportRequested += (_, s) => script = s;

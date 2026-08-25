@@ -16,7 +16,7 @@ public class GetPreflightCheckQueryHandlerTests
         var profile = new ConnectionProfile("server", "db", "user", "pw");
         var target = new SqlCollationName("Latin1_General_100_CI_AS_SC_UTF8");
         var plan = new MigrationPlan(target, target, false, new DatabaseSnapshotBuilder().Build(), [], []);
-        var expected = new PreflightCheckResult(1, 42, 1_000_000, 10.0);
+        var expected = new PreflightCheckResult(1, 42, 0, 1_000_000, 10.0, 0, 0);
 
         var service = new Mock<IPreflightCheckService>();
         service.Setup(s => s.CheckAsync(profile, plan, It.IsAny<CancellationToken>())).ReturnsAsync(expected);

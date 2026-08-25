@@ -49,8 +49,11 @@ public partial class MigrationResultViewModel(MigrationReport report) : ViewMode
             foreach (var diff in Report.Verification.StructuralDiffs)
                 text.AppendLine($"  [{Strings.ReportStructuralLabel}] {diff.ObjectDescription}: {diff.Details}");
 
-            foreach (var diff in Report.Verification.DataDiffs)
-                text.AppendLine($"  [{Strings.ReportDataLabel}] {diff.TableDescription}: {diff.Details}");
+            if (Report.Verification.DataVerificationSkipped)
+                text.AppendLine($"  [{Strings.ReportDataLabel}] {Strings.ReportDataVerificationSkipped}");
+            else
+                foreach (var diff in Report.Verification.DataDiffs)
+                    text.AppendLine($"  [{Strings.ReportDataLabel}] {diff.TableDescription}: {diff.Details}");
         }
 
         return text.ToString();

@@ -45,7 +45,7 @@ public class MainViewModelTests
         profile => new CollationOverviewViewModel(sender.Object, profile),
         profile => new TargetCollationPickerViewModel(sender.Object, profile),
         (profile, plan) => new MigrationPlanReviewViewModel(sender.Object, profile, plan),
-        (profile, plan) => new MigrationRunViewModel(sender.Object, profile, plan));
+        (profile, plan, skipDataVerification) => new MigrationRunViewModel(sender.Object, profile, plan, skipDataVerification));
 
     private static async Task<ConnectionProfile> ConnectAsync(MainViewModel vm)
     {

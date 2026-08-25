@@ -11,7 +11,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly Func<ConnectionProfile, CollationOverviewViewModel> _collationOverviewFactory;
     private readonly Func<ConnectionProfile, TargetCollationPickerViewModel> _targetCollationPickerFactory;
     private readonly Func<ConnectionProfile, MigrationPlan, MigrationPlanReviewViewModel> _planReviewFactory;
-    private readonly Func<ConnectionProfile, MigrationPlan, MigrationRunViewModel> _migrationRunFactory;
+    private readonly Func<ConnectionProfile, MigrationPlan, bool, MigrationRunViewModel> _migrationRunFactory;
 
     [ObservableProperty]
     public partial ViewModelBase CurrentViewModel { get; set; }
@@ -35,7 +35,7 @@ public partial class MainViewModel : ViewModelBase
         Func<ConnectionProfile, CollationOverviewViewModel> collationOverviewFactory,
         Func<ConnectionProfile, TargetCollationPickerViewModel> targetCollationPickerFactory,
         Func<ConnectionProfile, MigrationPlan, MigrationPlanReviewViewModel> planReviewFactory,
-        Func<ConnectionProfile, MigrationPlan, MigrationRunViewModel> migrationRunFactory)
+        Func<ConnectionProfile, MigrationPlan, bool, MigrationRunViewModel> migrationRunFactory)
     {
         _connectionSetupFactory = connectionSetupFactory;
         _collationOverviewFactory = collationOverviewFactory;
@@ -77,14 +77,14 @@ public partial class MainViewModel : ViewModelBase
         CurrentProfile = profile;
         var vm = _planReviewFactory(profile, plan);
         vm.BackRequested += (_, _) => CurrentViewModel = CreateTargetCollationPicker(profile);
-        vm.StartRequested += (_, args) => CurrentViewModel = CreateMigrationRun(args.Profile, args.Plan);
+        vm.StartRequested += (_, args) => CurrentViewModel = CreateMigrationRun(args.Profile, args.Plan, args.SkipDataVerification);
         return vm;
     }
 
-    private MigrationRunViewModel CreateMigrationRun(ConnectionProfile profile, MigrationPlan plan)
+    private MigrationRunViewModel CreateMigrationRun(ConnectionProfile profile, MigrationPlan plan, bool skipDataVerification)
     {
         CurrentProfile = profile;
-        var vm = _migrationRunFactory(profile, plan);
+        var vm = _migrationRunFactory(profile, plan, skipDataVerification);
         vm.Completed += (_, report) => CurrentViewModel = CreateMigrationResult(report);
         vm.CancelledAcknowledged += (_, _) => CurrentViewModel = CreateConnectionSetup();
         vm.UnexpectedErrorAcknowledged += (_, _) => CurrentViewModel = CreateConnectionSetup();

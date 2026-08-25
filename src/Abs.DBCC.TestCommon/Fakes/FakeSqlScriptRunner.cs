@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Abs.DBCC.Application.Ports;
 
 namespace Abs.DBCC.TestCommon.Fakes;
@@ -9,6 +10,7 @@ namespace Abs.DBCC.TestCommon.Fakes;
 public sealed class FakeSqlScriptRunner : ISqlScriptRunner
 {
     private readonly Queue<IReadOnlyList<IReadOnlyDictionary<string, object?>>> _queryResults = new();
+    private readonly Queue<IReadOnlyList<IReadOnlyDictionary<string, object?>>> _streamResults = new();
     private readonly Queue<object?> _scalarResults = new();
     private int _nonQueryCallCount;
 
@@ -30,6 +32,9 @@ public sealed class FakeSqlScriptRunner : ISqlScriptRunner
     public void EnqueueQueryResult(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows) =>
         _queryResults.Enqueue(rows);
 
+    public void EnqueueStreamResult(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows) =>
+        _streamResults.Enqueue(rows);
+
     public void EnqueueScalarResult(object? value) => _scalarResults.Enqueue(value);
 
     public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteQueryAsync(
@@ -43,6 +48,23 @@ public sealed class FakeSqlScriptRunner : ISqlScriptRunner
             ? _queryResults.Dequeue()
             : Array.Empty<IReadOnlyDictionary<string, object?>>();
         return Task.FromResult(result);
+    }
+
+    public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ExecuteQueryStreamAsync(
+        string sql, IReadOnlyDictionary<string, object?>? parameters = null, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ExecutedSql.Add(sql);
+        if (ThrowOnExecute is not null)
+            throw ThrowOnExecute;
+
+        var rows = _streamResults.Count > 0 ? _streamResults.Dequeue() : Array.Empty<IReadOnlyDictionary<string, object?>>();
+        foreach (var row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            yield return row;
+        }
+
+        await Task.CompletedTask;
     }
 
     public Task<int> ExecuteNonQueryAsync(

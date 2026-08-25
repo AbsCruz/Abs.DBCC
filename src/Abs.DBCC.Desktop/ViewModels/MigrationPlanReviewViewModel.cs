@@ -28,6 +28,15 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
     [ObservableProperty]
     public partial string? ErrorMessage { get; set; }
 
+    /// <summary>
+    /// Skips the before/after row-hash capture and comparison for this run. Intended for a production run
+    /// once the same migration has already been verified (including its data) against a backup or a
+    /// secondary system - re-verifying the data again in production adds no safety there, only time and
+    /// memory. The structural check still runs regardless.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool SkipDataVerification { get; set; }
+
     public string AffectedTablesDisplay { get; }
 
     public bool HasOtherActiveConnections => Preflight is { OtherActiveSessionCount: > 0 };
@@ -42,7 +51,27 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
         Preflight is null ? null : string.Format(Strings.TransactionLogFormat,
             string.Format(Strings.LogFileSizeFormat, Preflight.LogFileSizeBytes / 1024.0 / 1024.0, Preflight.LogUsedPercent));
 
-    public event EventHandler<(ConnectionProfile Profile, MigrationPlan Plan)>? StartRequested;
+    public string? EstimatedVerificationMemoryDisplay =>
+        Preflight is null ? null : string.Format(Strings.EstimatedVerificationMemoryFormat,
+            FormatBytes(DataVerificationMemoryEstimator.EstimateBytes(Preflight.TotalRowCount)), Preflight.TotalRowCount);
+
+    public string? AvailableMemoryDisplay =>
+        Preflight is null ? null : string.Format(Strings.AvailableMemoryFormat,
+            FormatBytes(Preflight.AvailableMemoryBytes), FormatBytes(Preflight.TotalMemoryBytes));
+
+    public bool EstimatedMemoryExceedsAvailable =>
+        Preflight is not null && DataVerificationMemoryEstimator.EstimateBytes(Preflight.TotalRowCount) > Preflight.AvailableMemoryBytes;
+
+    public string ProcessOverviewStep2 => string.Format(Strings.ProcessOverviewStep2Format, Plan.Steps.Count);
+
+    private static string FormatBytes(long bytes)
+    {
+        const double gb = 1024.0 * 1024 * 1024;
+        const double mb = 1024.0 * 1024;
+        return bytes >= gb ? $"{bytes / gb:F1} GB" : $"{bytes / mb:F0} MB";
+    }
+
+    public event EventHandler<(ConnectionProfile Profile, MigrationPlan Plan, bool SkipDataVerification)>? StartRequested;
     public event EventHandler? BackRequested;
 
     /// <summary>Raised with the generated T-SQL script; the view handles the actual save-file dialog.</summary>
@@ -69,6 +98,9 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
         OnPropertyChanged(nameof(OtherActiveConnectionsDisplay));
         OnPropertyChanged(nameof(EstimatedAffectedRowsDisplay));
         OnPropertyChanged(nameof(TransactionLogDisplay));
+        OnPropertyChanged(nameof(EstimatedVerificationMemoryDisplay));
+        OnPropertyChanged(nameof(AvailableMemoryDisplay));
+        OnPropertyChanged(nameof(EstimatedMemoryExceedsAvailable));
     }
 
     [RelayCommand]
@@ -92,7 +124,7 @@ public partial class MigrationPlanReviewViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void Start() => StartRequested?.Invoke(this, (_profile, Plan));
+    private void Start() => StartRequested?.Invoke(this, (_profile, Plan, SkipDataVerification));
 
     [RelayCommand]
     private void ExportScript() =>

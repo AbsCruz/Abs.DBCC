@@ -31,7 +31,7 @@ public class ExecuteMigrationCommandHandlerTests
 
         var dataVerification = new Mock<IDataVerificationService>();
         dataVerification
-            .Setup(d => d.CaptureRowsAsync(Profile, Snapshot, It.IsAny<CancellationToken>()))
+            .Setup(d => d.CaptureRowsAsync(Profile, Snapshot, It.IsAny<IProgress<TableCaptureProgress>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((IReadOnlyList<TableRowsSnapshot>)[]);
         dataVerification.Setup(d => d.Compare(It.IsAny<IReadOnlyList<TableRowsSnapshot>>(), It.IsAny<IReadOnlyList<TableRowsSnapshot>>()))
             .Returns((IReadOnlyList<DataDiff>)[]);
@@ -43,7 +43,7 @@ public class ExecuteMigrationCommandHandlerTests
         Assert.True(result.Succeeded);
         Assert.NotNull(result.Verification);
         Assert.True(result.Verification.IsSuccess);
-        dataVerification.Verify(d => d.CaptureRowsAsync(Profile, Snapshot, It.IsAny<CancellationToken>()), Times.Exactly(2));
+        dataVerification.Verify(d => d.CaptureRowsAsync(Profile, Snapshot, It.IsAny<IProgress<TableCaptureProgress>?>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class ExecuteMigrationCommandHandlerTests
         var structural = new Mock<IStructuralVerificationService>();
         var dataVerification = new Mock<IDataVerificationService>();
         dataVerification
-            .Setup(d => d.CaptureRowsAsync(Profile, Snapshot, It.IsAny<CancellationToken>()))
+            .Setup(d => d.CaptureRowsAsync(Profile, Snapshot, It.IsAny<IProgress<TableCaptureProgress>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((IReadOnlyList<TableRowsSnapshot>)[]);
 
         var handler = new ExecuteMigrationCommandHandler(orchestrator.Object, structural.Object, dataVerification.Object);
@@ -67,6 +67,38 @@ public class ExecuteMigrationCommandHandlerTests
 
         Assert.Same(failedReport, result);
         structural.Verify(s => s.VerifyAsync(It.IsAny<ConnectionProfile>(), It.IsAny<DatabaseSnapshot>(), It.IsAny<SqlCollationName>(), It.IsAny<CancellationToken>()), Times.Never);
-        dataVerification.Verify(d => d.CaptureRowsAsync(Profile, Snapshot, It.IsAny<CancellationToken>()), Times.Once);
+        dataVerification.Verify(d => d.CaptureRowsAsync(Profile, Snapshot, It.IsAny<IProgress<TableCaptureProgress>?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_SkipDataVerificationRequested_SkipsCaptureAndCompareButStillRunsStructuralCheck()
+    {
+        var orchestrator = new Mock<IMigrationOrchestrator>();
+        orchestrator
+            .Setup(o => o.ExecuteAsync(Profile, Plan, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MigrationReport(true, [], null, null));
+
+        var structural = new Mock<IStructuralVerificationService>();
+        structural
+            .Setup(s => s.VerifyAsync(Profile, Snapshot, Target, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<StructuralDiff>)[]);
+
+        var dataVerification = new Mock<IDataVerificationService>();
+
+        var handler = new ExecuteMigrationCommandHandler(orchestrator.Object, structural.Object, dataVerification.Object);
+
+        var result = await handler.Handle(new ExecuteMigrationCommand(Profile, Plan, SkipDataVerification: true), CancellationToken.None);
+
+        Assert.True(result.Succeeded);
+        Assert.NotNull(result.Verification);
+        Assert.True(result.Verification.DataVerificationSkipped);
+        Assert.Empty(result.Verification.DataDiffs);
+        structural.Verify(s => s.VerifyAsync(Profile, Snapshot, Target, It.IsAny<CancellationToken>()), Times.Once);
+        dataVerification.Verify(
+            d => d.CaptureRowsAsync(It.IsAny<ConnectionProfile>(), It.IsAny<DatabaseSnapshot>(), It.IsAny<IProgress<TableCaptureProgress>?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        dataVerification.Verify(
+            d => d.Compare(It.IsAny<IReadOnlyList<TableRowsSnapshot>>(), It.IsAny<IReadOnlyList<TableRowsSnapshot>>()),
+            Times.Never);
     }
 }

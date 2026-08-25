@@ -18,10 +18,12 @@
             <TextBlock Text="{x:Static res:Strings.ConnectionLostTitle}" FontSize="20" FontWeight="Bold" Foreground="Red" IsVisible="{Binding HasUnexpectedError}" />
             <TextBlock Text="{Binding UnexpectedErrorMessage}" Foreground="Red" TextWrapping="Wrap" IsVisible="{Binding HasUnexpectedError}" />
             <TextBlock Text="{x:Static res:Strings.MigrationCompletedTitle}" FontSize="20" FontWeight="Bold" IsVisible="{Binding !IsRunning}" />
-            <ProgressBar Minimum="0" Maximum="{Binding TotalStepCount}" Value="{Binding CompletedStepCount}" />
-            <TextBlock>
-                <Run Text="{Binding CompletedStepCount}" /><Run Text=" / " /><Run Text="{Binding TotalStepCount}" /><Run Text="{x:Static res:Strings.StepsSuffix}" />
+            <TextBlock Text="{Binding PhaseDescription}" FontWeight="SemiBold" IsVisible="{Binding IsRunning}" />
+            <ProgressBar Minimum="0" Maximum="{Binding PhaseTotal}" Value="{Binding PhaseCompleted}" IsIndeterminate="{Binding !PhaseHasCount}" IsVisible="{Binding IsRunning}" />
+            <TextBlock IsVisible="{Binding ShowPhaseCount}">
+                <Run Text="{Binding PhaseCompleted}" /><Run Text=" / " /><Run Text="{Binding PhaseTotal}" /><Run Text="{Binding PhaseUnitSuffix}" />
             </TextBlock>
+            <TextBlock Text="{Binding CurrentTableName}" FontStyle="Italic" Foreground="Gray" IsVisible="{Binding ShowCurrentTableName}" />
             <Button Content="{x:Static res:Strings.CancelButton}" Command="{Binding CancelCommand}" IsVisible="{Binding IsRunning}" />
             <Button Content="{x:Static res:Strings.BackToStartButton}" Command="{Binding AcknowledgeCancelledCommand}" IsVisible="{Binding WasCancelled}" />
             <Button Content="{x:Static res:Strings.BackToStartButton}" Command="{Binding AcknowledgeUnexpectedErrorCommand}" IsVisible="{Binding HasUnexpectedError}" />

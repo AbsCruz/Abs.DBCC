@@ -26,8 +26,25 @@
                 </StackPanel>
                 <TextBlock Text="{Binding EstimatedAffectedRowsDisplay}" />
                 <TextBlock Text="{Binding TransactionLogDisplay}" />
+                <StackPanel Spacing="4" IsVisible="{Binding !SkipDataVerification}">
+                    <TextBlock Text="{Binding EstimatedVerificationMemoryDisplay}" />
+                    <TextBlock Text="{Binding AvailableMemoryDisplay}" />
+                    <TextBlock Text="{x:Static res:Strings.MemoryEstimateExceedsAvailableWarning}" Foreground="OrangeRed" FontWeight="SemiBold"
+                               IsVisible="{Binding EstimatedMemoryExceedsAvailable}" />
+                </StackPanel>
             </StackPanel>
             <TextBlock Text="{Binding ErrorMessage}" Foreground="Red" />
+
+            <StackPanel Spacing="2" Margin="0,8,0,0">
+                <TextBlock Text="{x:Static res:Strings.ProcessOverviewTitle}" FontWeight="SemiBold" />
+                <TextBlock Text="{x:Static res:Strings.ProcessOverviewStep1}" IsVisible="{Binding !SkipDataVerification}" />
+                <TextBlock Text="{Binding ProcessOverviewStep2}" />
+                <TextBlock Text="{x:Static res:Strings.ProcessOverviewStep3}" />
+                <TextBlock Text="{x:Static res:Strings.ProcessOverviewStep4}" IsVisible="{Binding !SkipDataVerification}" />
+                <TextBlock Text="{x:Static res:Strings.ProcessOverviewStep5}" IsVisible="{Binding !SkipDataVerification}" />
+            </StackPanel>
+
+            <CheckBox Content="{x:Static res:Strings.SkipDataVerificationLabel}" IsChecked="{Binding SkipDataVerification}" Margin="0,8,0,0" />
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">

@@ -6,27 +6,42 @@ using Abs.DBCC.Domain.Snapshot;
 namespace Abs.DBCC.Infrastructure.Verification;
 
 /// <summary>
-/// Captures every row of every table (as .NET values read back through the data reader - the correct
-/// level to compare at, since a collation change can alter the underlying byte representation of a
-/// string without changing its logical value) and compares two such captures.
+/// Captures a per-row hash for every row of every table (hashing the value as read back through the data
+/// reader - the correct level to compare at, since a collation change can alter the underlying byte
+/// representation of a string without changing its logical value) and compares two such captures.
 ///
-/// Rows are compared after sorting both sides by a canonical string key rather than by relying on
-/// database-returned order: a heap table (no primary key/clustered index) has no guaranteed row order,
-/// and ALTER COLUMN can itself reorganize a heap's physical row order even when no cell's value
-/// actually changes, which would otherwise look like a false difference.
+/// Rows are hashed and sorted by hash rather than kept verbatim and sorted by content: a heap table (no
+/// primary key/clustered index) has no guaranteed row order, and ALTER COLUMN can itself reorganize a
+/// heap's physical row order even when no cell's value actually changes, which would otherwise look like
+/// a false difference. Hashing also means a table's rows are streamed and discarded one at a time rather
+/// than held in memory all at once, so verifying a large database doesn't require its full content to fit
+/// in memory twice (before + after).
 /// </summary>
 public sealed class DataVerificationService(ISqlScriptRunnerFactory runnerFactory) : IDataVerificationService
 {
     public async Task<IReadOnlyList<TableRowsSnapshot>> CaptureRowsAsync(
-        ConnectionProfile profile, DatabaseSnapshot snapshot, CancellationToken ct = default)
+        ConnectionProfile profile, DatabaseSnapshot snapshot, IProgress<TableCaptureProgress>? progress = null, CancellationToken ct = default)
     {
         await using var runner = await runnerFactory.CreateAsync(profile, ct);
         var result = new List<TableRowsSnapshot>();
+        var totalTables = snapshot.Tables.Count;
 
-        foreach (var table in snapshot.Tables)
+        for (var i = 0; i < totalTables; i++)
         {
-            var rows = await runner.ExecuteQueryAsync($"SELECT * FROM {table.Ref.Identifier.Quoted};", ct: ct);
-            result.Add(new TableRowsSnapshot(table.Ref, rows));
+            var table = snapshot.Tables[i];
+
+            // Reported before the query runs, not after: a single large table can dominate the whole
+            // phase's duration, and without this the UI would show no movement at all while it's being
+            // read - the table name at least tells the user what it's currently waiting on.
+            progress?.Report(new TableCaptureProgress(i + 1, totalTables, table.Ref.ToString()));
+
+            var hashes = new List<string>();
+
+            await foreach (var row in runner.ExecuteQueryStreamAsync($"SELECT * FROM {table.Ref.Identifier.Quoted};", ct: ct))
+                hashes.Add(RowHash.Compute(row));
+
+            hashes.Sort(StringComparer.Ordinal);
+            result.Add(new TableRowsSnapshot(table.Ref, hashes));
         }
 
         return result;
@@ -48,54 +63,22 @@ public sealed class DataVerificationService(ISqlScriptRunnerFactory runnerFactor
                 continue;
             }
 
-            var beforeRows = CanonicallyOrder(beforeByTable[tableRef].Rows);
-            var afterRows = CanonicallyOrder(afterSnapshot.Rows);
+            var beforeHashes = beforeByTable[tableRef].RowHashes;
+            var afterHashes = afterSnapshot.RowHashes;
 
-            if (beforeRows.Count != afterRows.Count)
+            if (beforeHashes.Count != afterHashes.Count)
             {
-                diffs.Add(new DataDiff(description, $"Zeilenanzahl geändert: {beforeRows.Count} -> {afterRows.Count}."));
+                diffs.Add(new DataDiff(description, $"Zeilenanzahl geändert: {beforeHashes.Count} -> {afterHashes.Count}."));
                 continue;
             }
 
-            for (var i = 0; i < beforeRows.Count; i++)
+            for (var i = 0; i < beforeHashes.Count; i++)
             {
-                if (!RowsEqual(beforeRows[i], afterRows[i]))
+                if (beforeHashes[i] != afterHashes[i])
                     diffs.Add(new DataDiff(description, $"Zeile {i + 1} weicht vom Vorher-Stand ab."));
             }
         }
 
         return diffs;
     }
-
-    private static List<IReadOnlyDictionary<string, object?>> CanonicallyOrder(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows) =>
-        rows.OrderBy(RowKey, StringComparer.Ordinal).ToList();
-
-    private static string RowKey(IReadOnlyDictionary<string, object?> row) =>
-        string.Join("|", row.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase).Select(kv => $"{kv.Key}={FormatValue(kv.Value)}"));
-
-    private static string FormatValue(object? value) => value switch
-    {
-        null => "<null>",
-        byte[] bytes => Convert.ToHexString(bytes),
-        _ => value.ToString() ?? "<null>"
-    };
-
-    private static bool RowsEqual(IReadOnlyDictionary<string, object?> before, IReadOnlyDictionary<string, object?> after)
-    {
-        if (before.Count != after.Count)
-            return false;
-
-        foreach (var (key, value) in before)
-        {
-            if (!after.TryGetValue(key, out var otherValue) || !ValuesEqual(value, otherValue))
-                return false;
-        }
-
-        return true;
-    }
-
-    private static bool ValuesEqual(object? a, object? b) =>
-        a is byte[] bytesA && b is byte[] bytesB
-            ? bytesA.AsSpan().SequenceEqual(bytesB)
-            : Equals(a, b);
 }

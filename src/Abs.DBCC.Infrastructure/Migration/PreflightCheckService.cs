@@ -5,7 +5,8 @@ using Abs.DBCC.Domain.Snapshot;
 
 namespace Abs.DBCC.Infrastructure.Migration;
 
-public sealed class PreflightCheckService(ISqlScriptRunnerFactory runnerFactory) : IPreflightCheckService
+public sealed class PreflightCheckService(
+    ISqlScriptRunnerFactory runnerFactory, ISystemMemoryInfoProvider systemMemory) : IPreflightCheckService
 {
     private const string ActiveSessionCountQuery = """
         SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE database_id = DB_ID() AND session_id <> @@SPID
@@ -39,11 +40,18 @@ public sealed class PreflightCheckService(ISqlScriptRunnerFactory runnerFactory)
             .Where(row => affectedTables.Contains(new ObjectRef((string)row["SchemaName"]!, (string)row["TableName"]!, DatabaseObjectKind.Table)))
             .Sum(row => Convert.ToInt64(row["RowCount"]));
 
+        // Data verification hashes every table in the database, not just the affected ones (see
+        // DataVerificationService), so the memory estimate needs the total row count across all of them.
+        var totalRowCount = rows.Sum(row => Convert.ToInt64(row["RowCount"]));
+
         var logRows = await runner.ExecuteQueryAsync(LogSpaceUsageQuery, ct: ct);
         var logRow = logRows.SingleOrDefault();
         var logFileSizeBytes = logRow is null ? 0L : Convert.ToInt64(logRow["total_log_size_in_bytes"]);
         var logUsedPercent = logRow is null ? 0d : Convert.ToDouble(logRow["used_log_space_in_percent"]);
 
-        return new PreflightCheckResult(sessionCount, affectedRowCount, logFileSizeBytes, logUsedPercent);
+        var (availableMemoryBytes, totalMemoryBytes) = systemMemory.GetPhysicalMemory();
+
+        return new PreflightCheckResult(
+            sessionCount, affectedRowCount, totalRowCount, logFileSizeBytes, logUsedPercent, availableMemoryBytes, totalMemoryBytes);
     }
 }

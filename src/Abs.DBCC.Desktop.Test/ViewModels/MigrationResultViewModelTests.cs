@@ -66,6 +66,22 @@ public class MigrationResultViewModelTests
     }
 
     [Fact]
+    public void BuildReportText_DataVerificationSkipped_MentionsSkippedInsteadOfDiffs()
+    {
+        var report = new MigrationReport(
+            true,
+            [],
+            null,
+            new VerificationResult([], [], DataVerificationSkipped: true));
+        var vm = new MigrationResultViewModel(report);
+
+        var text = vm.BuildReportText();
+
+        Assert.Contains($"[{Strings.ReportDataLabel}]", text);
+        Assert.Contains(Strings.ReportDataVerificationSkipped, text);
+    }
+
+    [Fact]
     public void RestartCommand_RaisesRestartRequested()
     {
         var vm = new MigrationResultViewModel(new MigrationReport(true, [], null, null));

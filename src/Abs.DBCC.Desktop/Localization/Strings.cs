@@ -46,6 +46,24 @@ public static class Strings
     public static string EstimatedAffectedRowsFormat => L("Geschätzte Zeilen in betroffenen Tabellen: {0}", "Estimated rows in affected tables: {0}");
     public static string TransactionLogFormat => L("Transaktionsprotokoll aktuell: {0}", "Transaction log currently: {0}");
     public static string LogFileSizeFormat => L("{0:F1} MB ({1:F1}% belegt)", "{0:F1} MB ({1:F1}% used)");
+    public static string EstimatedVerificationMemoryFormat => L(
+        "Geschätzter Speicherbedarf für die Datenprüfung: ~{0} (bei {1:N0} Zeilen in der gesamten Datenbank)",
+        "Estimated memory for data verification: ~{0} (based on {1:N0} rows across the whole database)");
+    public static string AvailableMemoryFormat => L(
+        "Vorhandener Arbeitsspeicher: {0} frei von {1} gesamt",
+        "Available memory: {0} free of {1} total");
+    public static string MemoryEstimateExceedsAvailableWarning => L(
+        "Achtung: Der geschätzte Speicherbedarf übersteigt den aktuell freien Arbeitsspeicher.",
+        "Warning: the estimated memory requirement exceeds the currently available memory.");
+    public static string ProcessOverviewTitle => L("Ablauf einer Migration:", "How a migration runs:");
+    public static string ProcessOverviewStep1 => L("1. Ausgangsdaten aller Tabellen werden zeilenweise gehasht (zur späteren Prüfung).", "1. Every table's current rows are hashed row by row (for later verification).");
+    public static string ProcessOverviewStep2Format => L("2. Die {0} Migrationsschritte werden ausgeführt.", "2. The {0} migration steps are executed.");
+    public static string ProcessOverviewStep3 => L("3. Die Datenbankstruktur wird geprüft.", "3. The database structure is verified.");
+    public static string ProcessOverviewStep4 => L("4. Die Daten aller Tabellen werden erneut gehasht.", "4. Every table's rows are hashed again.");
+    public static string ProcessOverviewStep5 => L("5. Vorher- und Nachher-Hashes werden verglichen.", "5. The before and after hashes are compared.");
+    public static string SkipDataVerificationLabel => L(
+        "Datenprüfung überspringen (z. B. wenn dieser Ablauf bereits mehrfach auf einem Backup/Zweitsystem geprüft wurde)",
+        "Skip data verification (e.g. when this run has already been verified repeatedly against a backup/secondary system)");
     public static string StartMigrationButton => L("Migration starten", "Start Migration");
     public static string ExportScriptButton => L("Als SQL-Skript exportieren", "Export as SQL Script");
     public static string SaveScriptDialogTitle => L("SQL-Skript speichern", "Save SQL Script");
@@ -56,6 +74,9 @@ public static class Strings
     public static string MigrationFailedTitle => L("Migration fehlgeschlagen", "Migration Failed");
     public static string StructuralCheckSucceeded => L("Strukturprüfung erfolgreich - keine Abweichungen.", "Structural check succeeded - no discrepancies.");
     public static string DiscrepanciesFound => L("Es wurden Abweichungen bei der Struktur- oder Datenprüfung gefunden:", "Discrepancies were found during the structural or data check:");
+    public static string DataVerificationSkippedNote => L(
+        "Hinweis: Die Datenprüfung wurde für diesen Lauf übersprungen.",
+        "Note: data verification was skipped for this run.");
     public static string ExportReportButton => L("Bericht exportieren", "Export Report");
     public static string RestartMigrationButton => L("Neue Migration starten", "Start New Migration");
     public static string StepLogLabel => L("Schritt-Log", "Step Log");
@@ -76,6 +97,7 @@ public static class Strings
     public static string ReportDiscrepanciesFound => L("Abweichungen gefunden", "discrepancies found");
     public static string ReportStructuralLabel => L("Struktur", "Structural");
     public static string ReportDataLabel => L("Daten", "Data");
+    public static string ReportDataVerificationSkipped => L("übersprungen für diesen Lauf", "skipped for this run");
 
     // MigrationRunView
     public static string MigrationRunningTitle => L("Migration läuft...", "Migration in progress...");
@@ -86,6 +108,13 @@ public static class Strings
     public static string StepsSuffix => L(" Schritte", " steps");
     public static string CancelButton => L("Abbrechen", "Cancel");
     public static string BackToStartButton => L("Zurück zum Start", "Back to Start");
+
+    public static string PhaseCapturingRowsBefore => L("Erfasse Ausgangsdaten (Zeilen-Hashes für die spätere Prüfung)...", "Capturing baseline data (row hashes for later verification)...");
+    public static string PhaseExecutingSteps => L("Führe Migrationsschritte aus...", "Executing migration steps...");
+    public static string PhaseVerifyingStructure => L("Prüfe Datenbankstruktur...", "Verifying database structure...");
+    public static string PhaseCapturingRowsAfter => L("Erfasse Zieldaten (Zeilen-Hashes für die Prüfung)...", "Capturing resulting data (row hashes for verification)...");
+    public static string PhaseComparingData => L("Vergleiche Vorher- und Nachher-Daten...", "Comparing before/after data...");
+    public static string TablesSuffix => L(" Tabellen", " tables");
 
     // TargetCollationPickerView
     public static string SelectTargetCollationTitle => L("Ziel-Collation wählen", "Select Target Collation");

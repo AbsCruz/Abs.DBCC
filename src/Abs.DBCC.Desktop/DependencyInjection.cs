@@ -17,8 +17,9 @@ public static class DependencyInjection
             sp => profile => ActivatorUtilities.CreateInstance<TargetCollationPickerViewModel>(sp, profile));
         services.AddSingleton<Func<ConnectionProfile, MigrationPlan, MigrationPlanReviewViewModel>>(
             sp => (profile, plan) => ActivatorUtilities.CreateInstance<MigrationPlanReviewViewModel>(sp, profile, plan));
-        services.AddSingleton<Func<ConnectionProfile, MigrationPlan, MigrationRunViewModel>>(
-            sp => (profile, plan) => ActivatorUtilities.CreateInstance<MigrationRunViewModel>(sp, profile, plan));
+        services.AddSingleton<Func<ConnectionProfile, MigrationPlan, bool, MigrationRunViewModel>>(
+            sp => (profile, plan, skipDataVerification) =>
+                ActivatorUtilities.CreateInstance<MigrationRunViewModel>(sp, profile, plan, skipDataVerification));
 
         services.AddSingleton<MainViewModel>();
 

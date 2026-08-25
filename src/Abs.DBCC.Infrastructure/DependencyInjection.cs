@@ -1,5 +1,6 @@
 using Abs.DBCC.Application.Ports;
 using Abs.DBCC.Infrastructure.Catalog;
+using Abs.DBCC.Infrastructure.Environment;
 using Abs.DBCC.Infrastructure.Migration;
 using Abs.DBCC.Infrastructure.Snapshot;
 using Abs.DBCC.Infrastructure.Sql;
@@ -13,6 +14,7 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services)
     {
         services.AddSingleton<ISqlScriptRunnerFactory, SqlScriptRunnerFactory>();
+        services.AddSingleton<ISystemMemoryInfoProvider, SystemMemoryInfoProvider>();
         services.AddSingleton<ICollationCatalogService, CollationCatalogService>();
         services.AddSingleton<IDatabaseInspectionService, DatabaseInspectionService>();
         services.AddSingleton<ISchemaSnapshotService, SchemaSnapshotService>();
