@@ -10,7 +10,8 @@ namespace Abs.DBCC.Application.Migration;
 public sealed record BuildMigrationPlanCommand(
     ConnectionProfile Profile,
     SqlCollationName TargetCollation,
-    bool UpdateDatabaseDefaultCollation = true) : IRequest<MigrationPlan>;
+    bool UpdateDatabaseDefaultCollation = true,
+    IReadOnlySet<ColumnRef>? ExcludedColumns = null) : IRequest<MigrationPlan>;
 
 public sealed class BuildMigrationPlanCommandValidator : AbstractValidator<BuildMigrationPlanCommand>
 {
@@ -28,6 +29,6 @@ public sealed class BuildMigrationPlanCommandHandler(
     public async Task<MigrationPlan> Handle(BuildMigrationPlanCommand request, CancellationToken cancellationToken)
     {
         var snapshot = await snapshotService.CaptureAsync(request.Profile, cancellationToken);
-        return planBuilder.Build(snapshot, request.TargetCollation, request.UpdateDatabaseDefaultCollation);
+        return planBuilder.Build(snapshot, request.TargetCollation, request.UpdateDatabaseDefaultCollation, request.ExcludedColumns);
     }
 }

@@ -32,6 +32,13 @@ public static class Strings
     public static string DatabaseDefaultCollationFormat => L("Datenbank-Default-Collation: {0}", "Database default collation: {0}");
     public static string Loading => L("Lädt...", "Loading...");
     public static string MixedCollationLabel => L("(gemischte Collation)", "(mixed collation)");
+    public static string FilterByCollationLabel => L("Nach Collation filtern:", "Filter by collation:");
+    public static string AllCollationsFilterOption => L("(alle Collations)", "(all collations)");
+    public static string ColumnNameHeader => L("Spalte", "Column");
+    public static string DataTypeHeader => L("Typ", "Type");
+    public static string CollationHeader => L("Collation", "Collation");
+    public static string ExcludeHeader => L("Ausschließen", "Exclude");
+    public static string ExcludeColumnLabel => L("Von der Collation-Migration ausschließen", "Exclude from the collation migration");
     public static string BackButton => L("Zurück", "Back");
     public static string ContinueToTargetCollationButton => L("Weiter zur Ziel-Collation", "Continue to Target Collation");
 

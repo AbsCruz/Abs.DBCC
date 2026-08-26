@@ -1,7 +1,8 @@
 using Abs.DBCC.Application.Collations;
 using Abs.DBCC.Application.Connections;
 using Abs.DBCC.Desktop.Localization;
-using Abs.DBCC.Domain.Inspection;
+using Abs.DBCC.Domain.Collation;
+using Abs.DBCC.Domain.Migration;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
@@ -23,15 +24,58 @@ public partial class CollationOverviewViewModel : ViewModelBase
     public partial string? DatabaseDefaultCollation { get; set; }
 
     [ObservableProperty]
-    public partial IReadOnlyList<TableCollationReport> Tables { get; set; } = [];
+    public partial IReadOnlyList<CollationTableRowViewModel> Rows { get; set; } = [];
+
+    [ObservableProperty]
+    public partial IReadOnlyList<CollationFilterOption> FilterOptions { get; set; } = [];
+
+    /// <summary>Only worth showing the filter once there is more than one real collation to choose between (the "all" option doesn't count).</summary>
+    public bool ShowCollationFilter => FilterOptions.Count > 2;
+
+    [ObservableProperty]
+    public partial CollationFilterOption? SelectedFilterOption { get; set; }
+
+    public IReadOnlyList<CollationTableDisplay> FilteredTables
+    {
+        get
+        {
+            var filter = SelectedFilterOption?.Collation;
+            return Rows
+                .Select(row => new CollationTableDisplay(
+                    row,
+                    filter is null ? row.Columns : row.Columns.Where(c => c.State.Collation == filter).ToList()))
+                .Where(d => d.VisibleColumns.Count > 0)
+                .ToList();
+        }
+    }
 
     public string? DatabaseDefaultCollationDisplay =>
         DatabaseDefaultCollation is null ? null : string.Format(Strings.DatabaseDefaultCollationFormat, DatabaseDefaultCollation);
 
     partial void OnDatabaseDefaultCollationChanged(string? value) => OnPropertyChanged(nameof(DatabaseDefaultCollationDisplay));
 
+    partial void OnRowsChanged(IReadOnlyList<CollationTableRowViewModel> value)
+    {
+        var allOption = new CollationFilterOption(null, Strings.AllCollationsFilterOption);
+        var collationOptions = value
+            .SelectMany(r => r.Columns)
+            .Select(c => c.State.Collation)
+            .Where(c => c is not null)
+            .Select(c => c!)
+            .Distinct()
+            .OrderBy(c => c.Value, StringComparer.OrdinalIgnoreCase)
+            .Select(c => new CollationFilterOption(c, c.Value));
+
+        FilterOptions = [allOption, .. collationOptions];
+        SelectedFilterOption = allOption;
+    }
+
+    partial void OnFilterOptionsChanged(IReadOnlyList<CollationFilterOption> value) => OnPropertyChanged(nameof(ShowCollationFilter));
+
+    partial void OnSelectedFilterOptionChanged(CollationFilterOption? value) => OnPropertyChanged(nameof(FilteredTables));
+
     public event EventHandler? BackRequested;
-    public event EventHandler? ContinueRequested;
+    public event EventHandler<IReadOnlySet<ColumnRef>>? ContinueRequested;
 
     public CollationOverviewViewModel(ISender sender, ConnectionProfile profile)
     {
@@ -50,7 +94,7 @@ public partial class CollationOverviewViewModel : ViewModelBase
         {
             var report = await _sender.Send(new GetDatabaseCollationReportQuery(_profile));
             DatabaseDefaultCollation = report.DatabaseDefaultCollation.Value;
-            Tables = report.Tables;
+            Rows = report.Tables.Select(t => new CollationTableRowViewModel(t)).ToList();
         }
         catch (Exception ex)
         {
@@ -66,5 +110,14 @@ public partial class CollationOverviewViewModel : ViewModelBase
     private void Back() => BackRequested?.Invoke(this, EventArgs.Empty);
 
     [RelayCommand]
-    private void Continue() => ContinueRequested?.Invoke(this, EventArgs.Empty);
+    private void Continue()
+    {
+        var excludedColumns = Rows
+            .SelectMany(r => r.Columns)
+            .Where(c => c.CanExclude && c.IsExcluded)
+            .Select(c => c.ColumnRef)
+            .ToHashSet();
+
+        ContinueRequested?.Invoke(this, excludedColumns);
+    }
 }

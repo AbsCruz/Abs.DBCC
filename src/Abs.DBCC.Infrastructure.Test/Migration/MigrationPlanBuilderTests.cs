@@ -40,6 +40,24 @@ public class MigrationPlanBuilderTests
     }
 
     [Fact]
+    public void Build_ExcludedColumn_IsSkippedAlongWithConstraintsTiedOnlyToIt()
+    {
+        var table = new TableSnapshotBuilder("dbo", "Orders")
+            .WithColumn("CustomerName", "varchar", Source.Value)
+            .WithColumn("Notes", "varchar", Source.Value)
+            .WithIndex("IX_Orders_CustomerName", ["CustomerName"])
+            .Build();
+        var snapshot = new DatabaseSnapshotBuilder().WithTable(table).Build();
+        var excluded = new HashSet<ColumnRef> { new("dbo", "Orders", "CustomerName") };
+
+        var plan = _sut.Build(snapshot, Target, updateDatabaseDefaultCollation: false, excluded);
+
+        var alterStep = Assert.Single(plan.Steps, s => s.Kind == MigrationStepKind.AlterColumnCollation);
+        Assert.Contains("Notes", alterStep.Sql);
+        Assert.DoesNotContain(plan.Steps, s => s.Sql.Contains("CustomerName"));
+    }
+
+    [Fact]
     public void Build_UpdateDatabaseDefaultCollation_RunsRightAfterTheLastAlterColumnStep()
     {
         // The invariant is "right after the last ALTER COLUMN", not "always last" - it happens to be

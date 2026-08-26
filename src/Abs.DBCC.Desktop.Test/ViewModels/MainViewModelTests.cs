@@ -41,7 +41,7 @@ public class MainViewModelTests
     private static MainViewModel CreateSut(Mock<ISender> sender) => new(
         () => new ConnectionSetupViewModel(sender.Object),
         profile => new CollationOverviewViewModel(sender.Object, profile),
-        profile => new TargetCollationPickerViewModel(sender.Object, profile),
+        (profile, excludedColumns) => new TargetCollationPickerViewModel(sender.Object, profile, excludedColumns),
         (profile, plan) => new MigrationPlanReviewViewModel(sender.Object, profile, plan),
         (profile, plan, skipDataVerification) => new MigrationRunViewModel(sender.Object, profile, plan, skipDataVerification));
 

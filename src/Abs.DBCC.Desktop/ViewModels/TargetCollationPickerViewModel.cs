@@ -3,6 +3,7 @@ using Abs.DBCC.Application.Connections;
 using Abs.DBCC.Application.Migration;
 using Abs.DBCC.Desktop.Localization;
 using Abs.DBCC.Domain.Collation;
+using Abs.DBCC.Domain.Migration;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MediatR;
@@ -14,6 +15,7 @@ public partial class TargetCollationPickerViewModel : ViewModelBase
 {
     private readonly ISender _sender;
     private readonly ConnectionProfile _profile;
+    private readonly IReadOnlySet<ColumnRef>? _excludedColumns;
 
     [ObservableProperty]
     public partial bool IsLoading { get; set; }
@@ -48,10 +50,11 @@ public partial class TargetCollationPickerViewModel : ViewModelBase
     public event EventHandler<(ConnectionProfile Profile, MigrationPlan Plan)>? PlanBuilt;
     public event EventHandler? BackRequested;
 
-    public TargetCollationPickerViewModel(ISender sender, ConnectionProfile profile)
+    public TargetCollationPickerViewModel(ISender sender, ConnectionProfile profile, IReadOnlySet<ColumnRef>? excludedColumns = null)
     {
         _sender = sender;
         _profile = profile;
+        _excludedColumns = excludedColumns;
         _ = LoadAsync();
     }
 
@@ -94,7 +97,7 @@ public partial class TargetCollationPickerViewModel : ViewModelBase
         try
         {
             var plan = await _sender.Send(new BuildMigrationPlanCommand(
-                _profile, new SqlCollationName(SelectedCollation.Name), UpdateDatabaseDefaultCollation));
+                _profile, new SqlCollationName(SelectedCollation.Name), UpdateDatabaseDefaultCollation, _excludedColumns));
 
             if (plan.IsNoOp)
             {

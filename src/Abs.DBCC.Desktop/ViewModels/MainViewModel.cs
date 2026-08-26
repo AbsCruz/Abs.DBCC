@@ -9,7 +9,7 @@ public partial class MainViewModel : ViewModelBase
 {
     private readonly Func<ConnectionSetupViewModel> _connectionSetupFactory;
     private readonly Func<ConnectionProfile, CollationOverviewViewModel> _collationOverviewFactory;
-    private readonly Func<ConnectionProfile, TargetCollationPickerViewModel> _targetCollationPickerFactory;
+    private readonly Func<ConnectionProfile, IReadOnlySet<ColumnRef>, TargetCollationPickerViewModel> _targetCollationPickerFactory;
     private readonly Func<ConnectionProfile, MigrationPlan, MigrationPlanReviewViewModel> _planReviewFactory;
     private readonly Func<ConnectionProfile, MigrationPlan, bool, MigrationRunViewModel> _migrationRunFactory;
 
@@ -31,7 +31,7 @@ public partial class MainViewModel : ViewModelBase
     public MainViewModel(
         Func<ConnectionSetupViewModel> connectionSetupFactory,
         Func<ConnectionProfile, CollationOverviewViewModel> collationOverviewFactory,
-        Func<ConnectionProfile, TargetCollationPickerViewModel> targetCollationPickerFactory,
+        Func<ConnectionProfile, IReadOnlySet<ColumnRef>, TargetCollationPickerViewModel> targetCollationPickerFactory,
         Func<ConnectionProfile, MigrationPlan, MigrationPlanReviewViewModel> planReviewFactory,
         Func<ConnectionProfile, MigrationPlan, bool, MigrationRunViewModel> migrationRunFactory)
     {
@@ -57,24 +57,24 @@ public partial class MainViewModel : ViewModelBase
         CurrentProfile = profile;
         var vm = _collationOverviewFactory(profile);
         vm.BackRequested += (_, _) => CurrentViewModel = CreateConnectionSetup();
-        vm.ContinueRequested += (_, _) => CurrentViewModel = CreateTargetCollationPicker(profile);
+        vm.ContinueRequested += (_, excludedColumns) => CurrentViewModel = CreateTargetCollationPicker(profile, excludedColumns);
         return vm;
     }
 
-    private TargetCollationPickerViewModel CreateTargetCollationPicker(ConnectionProfile profile)
+    private TargetCollationPickerViewModel CreateTargetCollationPicker(ConnectionProfile profile, IReadOnlySet<ColumnRef> excludedColumns)
     {
         CurrentProfile = profile;
-        var vm = _targetCollationPickerFactory(profile);
+        var vm = _targetCollationPickerFactory(profile, excludedColumns);
         vm.BackRequested += (_, _) => CurrentViewModel = CreateCollationOverview(profile);
-        vm.PlanBuilt += (_, args) => CurrentViewModel = CreatePlanReview(args.Profile, args.Plan);
+        vm.PlanBuilt += (_, args) => CurrentViewModel = CreatePlanReview(args.Profile, args.Plan, excludedColumns);
         return vm;
     }
 
-    private MigrationPlanReviewViewModel CreatePlanReview(ConnectionProfile profile, MigrationPlan plan)
+    private MigrationPlanReviewViewModel CreatePlanReview(ConnectionProfile profile, MigrationPlan plan, IReadOnlySet<ColumnRef> excludedColumns)
     {
         CurrentProfile = profile;
         var vm = _planReviewFactory(profile, plan);
-        vm.BackRequested += (_, _) => CurrentViewModel = CreateTargetCollationPicker(profile);
+        vm.BackRequested += (_, _) => CurrentViewModel = CreateTargetCollationPicker(profile, excludedColumns);
         vm.StartRequested += (_, args) => CurrentViewModel = CreateMigrationRun(args.Profile, args.Plan, args.SkipDataVerification);
         return vm;
     }

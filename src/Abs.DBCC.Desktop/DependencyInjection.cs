@@ -13,8 +13,8 @@ public static class DependencyInjection
         services.AddSingleton<Func<ConnectionSetupViewModel>>(sp => sp.GetRequiredService<ConnectionSetupViewModel>);
         services.AddSingleton<Func<ConnectionProfile, CollationOverviewViewModel>>(
             sp => profile => ActivatorUtilities.CreateInstance<CollationOverviewViewModel>(sp, profile));
-        services.AddSingleton<Func<ConnectionProfile, TargetCollationPickerViewModel>>(
-            sp => profile => ActivatorUtilities.CreateInstance<TargetCollationPickerViewModel>(sp, profile));
+        services.AddSingleton<Func<ConnectionProfile, IReadOnlySet<ColumnRef>, TargetCollationPickerViewModel>>(
+            sp => (profile, excludedColumns) => ActivatorUtilities.CreateInstance<TargetCollationPickerViewModel>(sp, profile, excludedColumns));
         services.AddSingleton<Func<ConnectionProfile, MigrationPlan, MigrationPlanReviewViewModel>>(
             sp => (profile, plan) => ActivatorUtilities.CreateInstance<MigrationPlanReviewViewModel>(sp, profile, plan));
         services.AddSingleton<Func<ConnectionProfile, MigrationPlan, bool, MigrationRunViewModel>>(

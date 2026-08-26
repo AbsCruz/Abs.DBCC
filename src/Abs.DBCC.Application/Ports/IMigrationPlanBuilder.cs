@@ -10,5 +10,5 @@ namespace Abs.DBCC.Application.Ports;
 /// </summary>
 public interface IMigrationPlanBuilder
 {
-    MigrationPlan Build(DatabaseSnapshot snapshot, SqlCollationName targetCollation, bool updateDatabaseDefaultCollation);
+    MigrationPlan Build(DatabaseSnapshot snapshot, SqlCollationName targetCollation, bool updateDatabaseDefaultCollation, IReadOnlySet<ColumnRef>? excludedColumns = null);
 }

@@ -1,7 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Abs.DBCC.Desktop.ViewModels"
-             xmlns:inspection="using:Abs.DBCC.Domain.Inspection"
              xmlns:res="using:Abs.DBCC.Desktop.Localization"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -16,6 +15,16 @@
             <TextBlock Text="{Binding DatabaseDefaultCollationDisplay}" />
             <TextBlock Text="{x:Static res:Strings.Loading}" IsVisible="{Binding IsLoading}" />
             <TextBlock Text="{Binding ErrorMessage}" Foreground="Red" IsVisible="{Binding ErrorMessage, Converter={x:Static ObjectConverters.IsNotNull}}" />
+            <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowCollationFilter}">
+                <TextBlock Text="{x:Static res:Strings.FilterByCollationLabel}" VerticalAlignment="Center" />
+                <ComboBox ItemsSource="{Binding FilterOptions}" SelectedItem="{Binding SelectedFilterOption}" MinWidth="220">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:CollationFilterOption">
+                            <TextBlock Text="{Binding DisplayName}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+            </StackPanel>
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,12,0,0">
@@ -24,33 +33,45 @@
         </StackPanel>
 
         <ScrollViewer>
-            <ItemsControl ItemsSource="{Binding Tables}">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="inspection:TableCollationReport">
-                        <Border BorderBrush="Gray" BorderThickness="0,0,0,1" Padding="0,8" Margin="0,0,0,4">
-                            <StackPanel>
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <TextBlock FontWeight="Bold">
-                                        <Run Text="{Binding SchemaName}" /><Run Text="." /><Run Text="{Binding TableName}" />
-                                    </TextBlock>
-                                    <TextBlock Text="{x:Static res:Strings.MixedCollationLabel}" Foreground="OrangeRed" IsVisible="{Binding IsMixedCollation}" />
+            <StackPanel>
+                <Grid ColumnDefinitions="220,110,*,90" Margin="16,0,0,4">
+                    <TextBlock Grid.Column="0" Text="{x:Static res:Strings.ColumnNameHeader}" FontWeight="Bold" />
+                    <TextBlock Grid.Column="1" Text="{x:Static res:Strings.DataTypeHeader}" FontWeight="Bold" />
+                    <TextBlock Grid.Column="2" Text="{x:Static res:Strings.CollationHeader}" FontWeight="Bold" />
+                    <TextBlock Grid.Column="3" Text="{x:Static res:Strings.ExcludeHeader}" FontWeight="Bold" HorizontalAlignment="Center" />
+                </Grid>
+                <Separator Margin="16,0,0,4" />
+
+                <ItemsControl ItemsSource="{Binding FilteredTables}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:CollationTableDisplay">
+                            <Border BorderBrush="Gray" BorderThickness="0,0,0,1" Padding="0,8" Margin="0,0,0,4">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock FontWeight="Bold">
+                                            <Run Text="{Binding Row.SchemaName}" /><Run Text="." /><Run Text="{Binding Row.TableName}" />
+                                        </TextBlock>
+                                        <TextBlock Text="{x:Static res:Strings.MixedCollationLabel}" Foreground="OrangeRed" IsVisible="{Binding Row.IsMixedCollation}" />
+                                    </StackPanel>
+                                    <ItemsControl ItemsSource="{Binding VisibleColumns}" Margin="16,4,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:CollationColumnRowViewModel">
+                                                <Grid ColumnDefinitions="220,110,*,90" Margin="0,3">
+                                                    <TextBlock Grid.Column="0" Text="{Binding ColumnName}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding SqlDataType}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="2" Text="{Binding CollationDisplay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                    <CheckBox Grid.Column="3" IsChecked="{Binding IsExcluded}" IsVisible="{Binding CanExclude}"
+                                                              HorizontalAlignment="Center" ToolTip.Tip="{x:Static res:Strings.ExcludeColumnLabel}" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                 </StackPanel>
-                                <ItemsControl ItemsSource="{Binding Columns}" Margin="16,4,0,0">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="inspection:ColumnCollationState">
-                                            <TextBlock>
-                                                <Run Text="{Binding ColumnName}" />
-                                                <Run Text=" (" /><Run Text="{Binding SqlDataType}" /><Run Text=")" />
-                                                <Run Text="{Binding Collation, StringFormat=' – {0}', TargetNullValue=''}" />
-                                            </TextBlock>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
         </ScrollViewer>
 
     </DockPanel>

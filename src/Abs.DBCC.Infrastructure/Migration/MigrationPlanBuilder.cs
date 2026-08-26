@@ -55,10 +55,14 @@ namespace Abs.DBCC.Infrastructure.Migration;
 /// </summary>
 public sealed class MigrationPlanBuilder : IMigrationPlanBuilder
 {
-    public Domain.Migration.MigrationPlan Build(DatabaseSnapshot snapshot, SqlCollationName targetCollation, bool updateDatabaseDefaultCollation)
+    public Domain.Migration.MigrationPlan Build(DatabaseSnapshot snapshot, SqlCollationName targetCollation, bool updateDatabaseDefaultCollation, IReadOnlySet<ColumnRef>? excludedColumns = null)
     {
+        var excluded = excludedColumns ?? (IReadOnlySet<ColumnRef>)new HashSet<ColumnRef>();
+
         var changingColumnsByTable = snapshot.Tables
-            .Select(t => (Table: t, Columns: t.ColumnsRequiringCollationChange(targetCollation).Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase)))
+            .Select(t => (Table: t, Columns: t.ColumnsRequiringCollationChange(targetCollation)
+                .Where(c => !excluded.Contains(new ColumnRef(t.Ref.SchemaName, t.Ref.Name, c.Name)))
+                .Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase)))
             .Where(x => x.Columns.Count > 0)
             .ToDictionary(x => x.Table.Ref, x => x.Columns);
 
